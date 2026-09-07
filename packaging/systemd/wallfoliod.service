@@ -1,0 +1,16 @@
+[Unit]
+Description=Wallfolio wallpaper catalog daemon
+After=graphical-session-pre.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/wallfoliod
+Restart=on-failure
+RestartSec=3
+UMask=0077
+MemoryHigh=384M
+MemoryMax=512M
+
+[Install]
+WantedBy=default.target

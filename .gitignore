@@ -1,3 +1,7 @@
 /target/
 /build/
 *.sqlite*
+/packaging/arch/*.tar.gz
+/packaging/arch/*.pkg.tar.*
+/packaging/arch/src/
+/packaging/arch/pkg/
