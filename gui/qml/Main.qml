@@ -4,6 +4,7 @@ import QtQuick.Layouts
 
 ApplicationWindow {
     id: window
+    required property var client
     visible: true
     width: 1180; height: 780
     minimumWidth: 820; minimumHeight: 580
@@ -38,6 +39,7 @@ ApplicationWindow {
         target: client
         function onCompleted(method, result) {
             window.status = "Ready"
+            window.startupRetry = false
             if (method === "catalog.search" || method === "provider.search") window.wallpapers = result
             else if (method === "catalog.add") { window.selected = result; window.status = "Saved to your library"; if(window.section !== "Discover") window.refresh() }
             else if (method === "wallpaper.apply") window.status = "Wallpaper applied"
@@ -45,6 +47,9 @@ ApplicationWindow {
             else if (result && result.id) { window.selected = result; if(window.section !== "Discover") window.refresh() }
         }
         function onFailed(message) {
+            window.status = message
+        }
+        function onUnavailable(message) {
             window.status = message
             if (!window.startupRetry) { window.startupRetry = true; client.startDaemon(); reconnect.start() }
         }
@@ -62,6 +67,7 @@ ApplicationWindow {
                     model: ["Library", "Discover", "Favorites"]
                     Button {
                         required property string modelData
+                        objectName: "nav" + modelData
                         text: modelData; Layout.fillWidth: true; highlighted: window.section === modelData
                         enabled: !client.busy
                         onClicked: { window.section = modelData; window.page = 1; search.text = ""; window.refresh() }
@@ -80,12 +86,13 @@ ApplicationWindow {
             Label { text: window.section === "Discover" ? "Find something worth coming back to." : "Your saved wallpapers, independent of where you found them."; color: "#95a6a5" }
             RowLayout {
                 ComboBox { id: provider; visible: window.section === "Discover"; model: ["wallhaven", "local"]; enabled: !client.busy }
-                TextField { id: search; Layout.fillWidth: true; placeholderText: window.section === "Discover" && provider.currentText === "local" ? "Absolute folder path" : "Search titles and tags…"; onAccepted: { window.page=1; window.refresh() } }
+                TextField { id: search; objectName: "searchInput"; Layout.fillWidth: true; placeholderText: window.section === "Discover" && provider.currentText === "local" ? "Absolute folder path" : "Search titles and tags…"; onAccepted: { window.page=1; window.refresh() } }
                 Button { text: "Search"; enabled: !client.busy; onClicked: { window.page=1; window.refresh() } }
                 Button { text: "Import file"; enabled: !client.busy; onClicked: importDialog.open() }
             }
             GridView {
                 id: grid
+                objectName: "wallpaperGrid"
                 Layout.fillWidth: true; Layout.fillHeight: true; clip: true
                 cellWidth: Math.floor(width / Math.max(2, Math.floor(width/250))); cellHeight: 206
                 model: window.wallpapers
@@ -106,7 +113,7 @@ ApplicationWindow {
                             Label { text: modelData.title; Layout.fillWidth: true; elide: Text.ElideRight; font.bold: true }
                             Label { text: (modelData.favorite ? "♥  " : "") + modelData.provider + (modelData.local_path ? " · Downloaded" : ""); color: "#a0b4af"; font.pixelSize: 12 }
                         }
-                        MouseArea { anchors.fill: parent; onClicked: { window.selected = modelData; detail.open() } }
+                        MouseArea { anchors.fill: parent; enabled: !client.busy; onClicked: { window.selected = modelData; detail.open() } }
                     }
                 }
                 Label { anchors.centerIn: parent; visible: !client.busy && window.wallpapers.length === 0; text: "No wallpapers here yet. Import a file or explore Discover."; color: "#95a6a5"; wrapMode: Text.WordWrap; width: parent.width-40; horizontalAlignment: Text.AlignHCenter }
@@ -127,7 +134,7 @@ ApplicationWindow {
         onAccepted: client.request("catalog.add", {provider: "local", external_id: importPath.text})
     }
     Dialog {
-        id: detail; anchors.centerIn: parent; width: Math.min(window.width-50,850); height: window.height-60; modal: true
+        id: detail; objectName: "detailDialog"; anchors.centerIn: parent; width: Math.min(window.width-50,850); height: window.height-60; modal: true
         title: window.selected ? window.selected.title : "Wallpaper"
         standardButtons: Dialog.Close
         ColumnLayout {
@@ -141,7 +148,7 @@ ApplicationWindow {
             RowLayout {
                 enabled: !client.busy
                 Button { text: "Save to library"; visible: window.selected && !window.selected.id; onClicked: client.request("catalog.add", {provider: window.selected.provider, external_id: window.selected.external_id}) }
-                Button { text: "Download"; visible: window.selected && !!window.selected.id; onClicked: window.action("wallpaper.download") }
+                Button { objectName: "downloadButton"; text: "Download"; visible: window.selected && !!window.selected.id; onClicked: window.action("wallpaper.download") }
                 Button { text: window.selected && window.selected.favorite ? "Unfavorite" : "Favorite"; visible: window.selected && !!window.selected.id; onClicked: window.action(window.selected.favorite ? "favorite.remove" : "favorite.add") }
                 Button { text: "Delete local copy"; visible: window.selected && !!window.selected.local_path; onClicked: window.action("wallpaper.delete_local") }
                 Button { text: "Remove from library"; visible: window.selected && !!window.selected.id; onClicked: removeDialog.open() }

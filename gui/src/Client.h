@@ -14,6 +14,7 @@ signals:
     void busyChanged();
     void completed(QString method, QVariant result);
     void failed(QString message);
+    void unavailable(QString message);
 private:
     bool m_busy = false;
 };

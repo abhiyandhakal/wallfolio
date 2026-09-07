@@ -12,7 +12,7 @@ int main(int argc, char **argv) {
     QQuickStyle::setStyle("Basic");
     Client client;
     QQmlApplicationEngine engine;
-    engine.rootContext()->setContextProperty("client", &client);
+    engine.setInitialProperties({{"client", QVariant::fromValue(&client)}});
     engine.load(QUrl("qrc:/Wallfolio/qml/Main.qml"));
     if (engine.rootObjects().isEmpty()) return 1;
     const auto screenshot = qEnvironmentVariable("WALLFOLIO_SCREENSHOT");

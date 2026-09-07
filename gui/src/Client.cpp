@@ -30,8 +30,12 @@ void Client::request(const QString &method, const QVariantMap &params) {
         m_busy = false; emit busyChanged(); return true;
     };
     connect(timer,&QTimer::timeout,this,[this,finish]() { if (finish()) emit failed("Request timed out. Check the daemon and try again."); });
-    connect(socket,&QLocalSocket::errorOccurred,this,[this,socket,finish](auto) {
-        const auto message = socket->errorString(); if (finish()) emit failed(message);
+    connect(socket,&QLocalSocket::errorOccurred,this,[this,socket,finish](auto error) {
+        const auto message = socket->errorString();
+        if (!finish()) return;
+        if (error == QLocalSocket::ServerNotFoundError || error == QLocalSocket::ConnectionRefusedError)
+            emit unavailable(message);
+        else emit failed(message);
     });
     connect(socket,&QLocalSocket::connected,this,[socket,method,params]() {
         socket->write(QJsonDocument(QJsonObject{{"version",1},{"method",method},{"params",QJsonObject::fromVariantMap(params)}}).toJson(QJsonDocument::Compact) + '\n');
