@@ -31,10 +31,32 @@ fn main() -> Result<()> {
             })
             .join("wallfolio")
     });
+    fs::create_dir_all(&root)?;
+    let data_lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(root.join("daemon.lock"))?;
+    data_lock
+        .try_lock()
+        .context("another daemon owns this catalog")?;
     let socket = args.socket.unwrap_or_else(wallfolio_protocol::socket_path);
     let parent = socket.parent().context("socket needs a parent directory")?;
-    fs::create_dir_all(parent)?;
-    fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+    if !parent.exists() {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(parent)?;
+    }
+    let socket_lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(socket.with_extension("lock"))?;
+    socket_lock
+        .try_lock()
+        .context("another daemon owns this socket")?;
     if socket.exists() {
         if UnixStream::connect(&socket).is_ok() {
             bail!("daemon already running");
@@ -80,7 +102,13 @@ fn serve(app: &Application, stream: &mut UnixStream) -> Result<()> {
             Err(error) => Response::failure(error),
         }
     };
-    serde_json::to_writer(&mut *stream, &response)?;
+    let mut bytes = serde_json::to_vec(&response)?;
+    if bytes.len() as u64 >= MAX_FRAME {
+        bytes = serde_json::to_vec(&Response::failure(
+            "response too large; use a smaller result limit",
+        ))?;
+    }
+    stream.write_all(&bytes)?;
     stream.write_all(b"\n")?;
     Ok(())
 }

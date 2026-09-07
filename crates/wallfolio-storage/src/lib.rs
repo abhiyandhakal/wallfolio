@@ -22,9 +22,14 @@ impl Storage {
         Ok(Self { root })
     }
     pub fn import(&self, mut input: impl Read) -> Result<StoredImage> {
-        let temporary = self.root.join("originals/.incoming");
+        let temporary = self
+            .root
+            .join(format!("originals/.incoming-{}", uuid::Uuid::new_v4()));
         let result = (|| {
-            let mut out = fs::File::create(&temporary)?;
+            let mut out = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temporary)?;
             let mut hash = Sha256::new();
             let mut total = 0u64;
             let mut buffer = [0u8; 65536];
