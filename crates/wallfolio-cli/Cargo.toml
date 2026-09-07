@@ -9,6 +9,7 @@ license.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true
 clap.workspace = true
+clap_complete.workspace = true
 wallfolio-protocol = { path = "../wallfolio-protocol" }
 
 [[bin]]

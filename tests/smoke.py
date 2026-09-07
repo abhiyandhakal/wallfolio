@@ -32,9 +32,9 @@ with tempfile.TemporaryDirectory(prefix='wallfolio-test-') as tmp:
     (tools/"hyprctl").write_text(setter.read_text())
     (tools/"hyprctl").chmod(0o755)
     env = dict(os.environ, WALLFOLIO_SOCKET=str(sock), PATH=str(tools)+os.pathsep+os.environ['PATH'], WAYLAND_DISPLAY='test', WALLFOLIO_TEST_ARGS=str(tmp/'args'))
-    daemon = subprocess.Popen([str(ROOT / 'target/debug/wallfoliod'), '--data-dir', str(tmp/'data')], env=env, stderr=subprocess.PIPE)
+    daemon = subprocess.Popen([str(ROOT / 'target/debug/wallfoliod'), '--data-dir', 'data'], cwd=tmp, env=env, stderr=subprocess.PIPE)
     def cli(*args, ok=True):
-        result = subprocess.run([str(ROOT/'target/debug/wallfolio'), *args], env=env, capture_output=True, text=True, timeout=10)
+        result = subprocess.run([str(ROOT/'target/debug/wallfolio'), *args], env=env, cwd=tmp, capture_output=True, text=True, timeout=10)
         if ok:
             assert result.returncode == 0, result.stderr
             return json.loads(result.stdout)
@@ -48,7 +48,7 @@ with tempfile.TemporaryDirectory(prefix='wallfolio-test-') as tmp:
         assert cli('search') == []
         assert len(cli('provider', 'search', 'local', str(tmp))) == 2
         a = cli('add', str(source))
-        assert a['id'] == cli('add', str(source))['id']
+        assert a['id'] == cli('add', 'mountain.png')['id']
         assert a['local_path'] is None
         a = cli('download', a['id'])
         managed = Path(a['local_path'])

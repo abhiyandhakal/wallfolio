@@ -19,7 +19,9 @@ pub struct Storage {
 impl Storage {
     pub fn new(root: PathBuf) -> Result<Self> {
         fs::create_dir_all(root.join("originals"))?;
-        Ok(Self { root })
+        Ok(Self {
+            root: root.canonicalize()?,
+        })
     }
     pub fn import(&self, mut input: impl Read) -> Result<StoredImage> {
         let temporary = self
@@ -114,7 +116,14 @@ mod tests {
         let bytes = bytes.into_inner();
         let stored = storage.import(Cursor::new(&bytes))?;
         assert_eq!(stored.path, storage.import(Cursor::new(&bytes))?.path);
-        assert!(storage.import(Cursor::new(&bytes[..40])).is_err());
+        let truncated = &bytes[..45];
+        assert_eq!(
+            image::ImageReader::new(Cursor::new(truncated))
+                .with_guessed_format()?
+                .into_dimensions()?,
+            (2, 2)
+        );
+        assert!(storage.import(Cursor::new(truncated)).is_err());
         assert!(!fs::read_dir(root.join("originals"))?.any(|e| e
             .unwrap()
             .file_name()

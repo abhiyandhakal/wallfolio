@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use serde_json::{json, Value};
 use std::{
     io::{BufRead, BufReader, Read, Write},
@@ -18,6 +18,11 @@ struct Args {
 }
 #[derive(Subcommand)]
 enum Commands {
+    /// Print shell completion definitions without connecting to the daemon.
+    Completions {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
     Search {
         #[arg(default_value = "")]
         query: String,
@@ -84,7 +89,16 @@ enum ProviderCommand {
 }
 fn main() -> Result<()> {
     let args = Args::parse();
-    let (method, params): (&str, Value) = match args.command {
+    let (method, mut params): (&str, Value) = match args.command {
+        Commands::Completions { shell } => {
+            clap_complete::generate(
+                shell,
+                &mut Args::command(),
+                "wallfolio",
+                &mut std::io::stdout(),
+            );
+            return Ok(());
+        }
         Commands::Search {
             query,
             favorite,
@@ -143,6 +157,17 @@ fn main() -> Result<()> {
         Commands::Backends => ("device.backends", json!({})),
         Commands::Info => ("device.info", json!({})),
     };
+    // Local paths are relative to the invoking client, not the daemon's cwd.
+    if params["provider"] == "local" {
+        let key = if method == "provider.search" {
+            "query"
+        } else {
+            "external_id"
+        };
+        let path = std::fs::canonicalize(params[key].as_str().context("missing local path")?)
+            .context("cannot resolve local path")?;
+        params[key] = json!(path.to_str().context("local path is not UTF-8")?);
+    }
     let socket = args.socket.unwrap_or_else(wallfolio_protocol::socket_path);
     let mut stream = UnixStream::connect(&socket)
         .with_context(|| format!("cannot connect to {}; start wallfoliod", socket.display()))?;
