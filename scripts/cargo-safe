@@ -1,0 +1,10 @@
+#!/bin/sh
+# Bound the entire build process tree when a user systemd manager is available.
+set -eu
+export CARGO_BUILD_JOBS=1
+if systemctl --user show-environment >/dev/null 2>&1; then
+    exec systemd-run --user --scope --quiet -p MemoryMax=3G -p MemorySwapMax=0 -p CPUQuota=150% cargo "$@"
+fi
+# Per-process address-space fallback, plus serialized compilation.
+ulimit -v 3145728
+exec cargo "$@"
