@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in live Wallhaven check; downloads one SFW image into a temporary catalog."""
+"""Opt-in live Wallhaven check; downloads one image into a temporary catalog."""
 import json
 import os
 from pathlib import Path

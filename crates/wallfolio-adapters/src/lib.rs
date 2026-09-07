@@ -115,11 +115,7 @@ impl WallpaperProvider for WallhavenProvider {
     fn search(&self, query: &str, page: u32) -> Result<Vec<Candidate>> {
         let value = self.request(
             "https://wallhaven.cc/api/v1/search",
-            &[
-                ("q", query.into()),
-                ("page", page.max(1).to_string()),
-                ("purity", "100".into()),
-            ],
+            &[("q", query.into()), ("page", page.max(1).to_string())],
         )?;
         value["data"]
             .as_array()

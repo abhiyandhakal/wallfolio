@@ -65,7 +65,8 @@ The examples use placeholders: replace `<catalog-id>` with an ID returned by
 exit status. `wallfolio completions <shell>` generates completion definitions
 without requiring a running daemon. `wallfolio --help` lists all commands and pagination options.
 Local discovery searches one directory (up to 10,000 entries), without recursion.
-Wallhaven discovery uses its public SFW API; no account or API token is needed.
+Wallhaven discovery sends only the search query and page to its public API,
+without explicit filters; no account or API token is needed.
 
 ## Image lifecycle
 
@@ -123,7 +124,7 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_BACKEND=software QT_QUICK_CONTROLS_STYLE=Basi
 ```
 
 An optional network test exercises the real Wallhaven adapter and downloads one
-SFW image into a temporary directory, which is cleaned afterward:
+image into a temporary directory, which is cleaned afterward:
 
 ```sh
 python3 tests/live_provider.py

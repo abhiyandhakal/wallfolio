@@ -11,7 +11,7 @@ background jobs remain v0.2 work.
 | --- | --- | --- |
 | Rust application core | `wallfolio-core` dispatches catalog, provider, storage, and apply services | Workspace build, tests, Clippy |
 | SQLite catalog | Stable UUIDs; provenance uniqueness; metadata persisted separately from images; schema version guard | Catalog tests and daemon restart smoke test |
-| Wallhaven provider | Public SFW search, details, cataloguing, HTTPS image download | `tests/live_provider.py` uses the actual public service |
+| Wallhaven provider | Public search without explicit filters, details, cataloguing, HTTPS image download | `tests/live_provider.py` uses the actual public service |
 | Local folder provider | Paged single-directory discovery; PNG/JPEG/WebP imports | Isolated CLI smoke test |
 | swww backend | Executable/session detection, optional monitor, timeout and exit-status errors | Fake executable captures exact arguments in smoke test |
 | Hyprpaper backend | Current `hyprctl hyprpaper wallpaper` IPC, optional monitor, input validation | Fake executable captures exact arguments; official IPC reference linked in README |
