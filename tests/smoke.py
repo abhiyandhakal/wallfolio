@@ -29,6 +29,8 @@ with tempfile.TemporaryDirectory(prefix='wallfolio-test-') as tmp:
     setter = tools / 'swww'
     setter.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$WALLFOLIO_TEST_ARGS"\n')
     setter.chmod(0o755)
+    (tools/"hyprctl").write_text(setter.read_text())
+    (tools/"hyprctl").chmod(0o755)
     env = dict(os.environ, WALLFOLIO_SOCKET=str(sock), PATH=str(tools)+os.pathsep+os.environ['PATH'], WAYLAND_DISPLAY='test', WALLFOLIO_TEST_ARGS=str(tmp/'args'))
     daemon = subprocess.Popen([str(ROOT / 'target/debug/wallfoliod'), '--data-dir', str(tmp/'data')], env=env, stderr=subprocess.PIPE)
     def cli(*args, ok=True):
@@ -57,6 +59,9 @@ with tempfile.TemporaryDirectory(prefix='wallfolio-test-') as tmp:
         assert b['local_path'] == str(managed)
         cli('set', a['id'], '--backend', 'swww', '--monitor', 'DP-1')
         assert (tmp/'args').read_text().splitlines() == ['img', str(managed), '--outputs', 'DP-1']
+        cli('set', a['id'], '--backend', 'hyprpaper', '--monitor', 'DP-1')
+        assert (tmp/'args').read_text().splitlines() == ['hyprpaper', 'wallpaper', 'DP-1,'+str(managed)]
+        cli('set', a['id'], '--backend', 'hyprpaper', '--monitor', 'bad,name', ok=False)
         competing = subprocess.run([str(ROOT/'target/debug/wallfoliod'), '--data-dir', str(tmp/'data'), '--socket',str(tmp/'other.sock')],env=env,capture_output=True,timeout=5)
         assert competing.returncode != 0, 'two daemons must not own one catalog' 
         cli('favorite', a['id'])

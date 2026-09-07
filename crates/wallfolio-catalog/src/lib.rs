@@ -25,13 +25,21 @@ impl Catalog {
     pub fn open(path: &Path) -> Result<Self> {
         let db = Connection::open(path)?;
         db.busy_timeout(std::time::Duration::from_secs(5))?;
-        db.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
-          CREATE TABLE IF NOT EXISTS wallpapers (
-            id TEXT PRIMARY KEY, provider TEXT NOT NULL, external_id TEXT NOT NULL,
-            document TEXT NOT NULL, UNIQUE(provider, external_id));
-          PRAGMA user_version=1;",
-        )?;
+        let version: u32 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if version > 1 {
+            bail!("catalog schema {version} requires a newer Wallfolio version");
+        }
+        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        if version == 0 {
+            db.execute_batch(
+                "BEGIN IMMEDIATE;
+              CREATE TABLE IF NOT EXISTS wallpapers (
+                id TEXT PRIMARY KEY, provider TEXT NOT NULL, external_id TEXT NOT NULL,
+                document TEXT NOT NULL, UNIQUE(provider, external_id));
+              PRAGMA user_version=1;
+              COMMIT;",
+            )?;
+        }
         Ok(Self(db))
     }
     pub fn add(&self, mut wallpaper: Wallpaper) -> Result<Wallpaper> {
@@ -117,6 +125,20 @@ mod tests {
             width: None,
             height: None,
         }
+    }
+    #[test]
+    fn newer_schema_is_not_modified() -> Result<()> {
+        let path = std::env::temp_dir().join(format!("wallfolio-schema-{}.db", Uuid::new_v4()));
+        let db = Connection::open(&path)?;
+        db.execute_batch("PRAGMA user_version=2")?;
+        assert!(Catalog::open(&path).is_err());
+        assert_eq!(
+            db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))?,
+            2
+        );
+        drop(db);
+        std::fs::remove_file(path)?;
+        Ok(())
     }
     #[test]
     fn identity_search_and_lifecycle() -> Result<()> {
