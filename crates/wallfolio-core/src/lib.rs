@@ -49,6 +49,17 @@ impl Application {
             "device.info" => Ok(
                 json!({"version": env!("CARGO_PKG_VERSION"), "os": std::env::consts::OS, "desktop": std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default()}),
             ),
+            "device.settings" => {
+                Ok(json!({"preferred_backend": self.catalog.preferred_backend()?}))
+            }
+            "device.settings.update" => {
+                let backend = required(&p, "preferred_backend")?;
+                if !self.backends.contains_key(backend) {
+                    bail!("unknown backend");
+                }
+                self.catalog.set_preferred_backend(backend)?;
+                Ok(json!({"preferred_backend": backend}))
+            }
             "device.backends" => Ok(serde_json::to_value(
                 self.backends.values().map(|b| b.info()).collect::<Vec<_>>(),
             )?),
@@ -58,10 +69,20 @@ impl Application {
                     .providers
                     .get(required(&p, "provider")?)
                     .context("unknown provider")?;
-                Ok(serde_json::to_value(provider.search(
-                    p["query"].as_str().unwrap_or(""),
-                    number(&p, "page", 1),
-                )?)?)
+                let candidates =
+                    provider.search(p["query"].as_str().unwrap_or(""), number(&p, "page", 1))?;
+                let ids: Vec<String> = candidates.iter().map(|c| c.external_id.clone()).collect();
+                let saved = self.catalog.matching_sources(provider.id(), &ids)?;
+                let result: Result<Vec<Value>> = candidates
+                    .into_iter()
+                    .map(|candidate| {
+                        Ok(match saved.get(&candidate.external_id) {
+                            Some(wallpaper) => serde_json::to_value(wallpaper)?,
+                            None => serde_json::to_value(candidate)?,
+                        })
+                    })
+                    .collect();
+                Ok(json!(result?))
             }
             "provider.get" => Ok(serde_json::to_value(
                 self.providers
@@ -167,7 +188,9 @@ impl Application {
                 if !path.is_file() {
                     bail!("local copy is missing; download it again");
                 }
-                let backend = match p["backend"].as_str().filter(|s| !s.is_empty()) {
+                let preferred = self.catalog.preferred_backend()?;
+                let explicit = p["backend"].as_str().filter(|s| !s.is_empty());
+                let backend = match explicit.or(preferred.as_deref()) {
                     Some(name) => self.backends.get(name).context("unknown backend")?,
                     None => self
                         .backends
@@ -176,6 +199,9 @@ impl Application {
                         .context("no available wallpaper backend")?,
                 };
                 backend.apply(&path, p["monitor"].as_str())?;
+                if let Some(name) = explicit {
+                    self.catalog.set_preferred_backend(name)?;
+                }
                 Ok(json!({"applied":true,"backend":backend.info().id}))
             }
             _ => bail!("unknown method: {method}"),

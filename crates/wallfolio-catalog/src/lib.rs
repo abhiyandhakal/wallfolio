@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use uuid::Uuid;
@@ -26,7 +26,7 @@ impl Catalog {
         let db = Connection::open(path)?;
         db.busy_timeout(std::time::Duration::from_secs(5))?;
         let version: u32 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        if version > 1 {
+        if version > 2 {
             bail!("catalog schema {version} requires a newer Wallfolio version");
         }
         db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
@@ -40,7 +40,53 @@ impl Catalog {
               COMMIT;",
             )?;
         }
+        if version < 2 {
+            db.execute_batch(
+                "BEGIN IMMEDIATE;
+                CREATE TABLE device_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                PRAGMA user_version=2;
+                COMMIT;",
+            )?;
+        }
         Ok(Self(db))
+    }
+    pub fn preferred_backend(&self) -> Result<Option<String>> {
+        Ok(self
+            .0
+            .query_row(
+                "SELECT value FROM device_settings WHERE key='preferred_backend'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+    pub fn set_preferred_backend(&self, backend: &str) -> Result<()> {
+        self.0.execute(
+            "INSERT INTO device_settings(key,value) VALUES ('preferred_backend',?1)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [backend],
+        )?;
+        Ok(())
+    }
+    /// One indexed lookup for a page of provider candidates, never the whole catalog.
+    pub fn matching_sources(
+        &self,
+        provider: &str,
+        external_ids: &[String],
+    ) -> Result<std::collections::BTreeMap<String, Wallpaper>> {
+        let mut stmt = self.0.prepare(
+            "SELECT document FROM wallpapers
+            WHERE provider=?1 AND external_id IN (SELECT value FROM json_each(?2))",
+        )?;
+        let rows = stmt.query_map(
+            params![provider, serde_json::to_string(external_ids)?],
+            |r| r.get::<_, String>(0),
+        )?;
+        rows.map(|row| {
+            let wallpaper: Wallpaper = serde_json::from_str(&row?)?;
+            Ok((wallpaper.external_id.clone(), wallpaper))
+        })
+        .collect()
     }
     pub fn add(&self, mut wallpaper: Wallpaper) -> Result<Wallpaper> {
         let mut stmt = self
@@ -127,14 +173,52 @@ mod tests {
         }
     }
     #[test]
+    fn migrates_v1_and_persists_preferences_without_changing_wallpapers() -> Result<()> {
+        let path = std::env::temp_dir().join(format!("wallfolio-migrate-{}.db", Uuid::new_v4()));
+        let old = Connection::open(&path)?;
+        old.execute_batch("CREATE TABLE wallpapers (id TEXT PRIMARY KEY, provider TEXT NOT NULL,
+            external_id TEXT NOT NULL, document TEXT NOT NULL, UNIQUE(provider,external_id)); PRAGMA user_version=1;")?;
+        let mut wallpaper = candidate();
+        wallpaper.id = "existing-id".into();
+        wallpaper.favorite = true;
+        old.execute(
+            "INSERT INTO wallpapers VALUES (?1,?2,?3,?4)",
+            params![
+                wallpaper.id,
+                wallpaper.provider,
+                wallpaper.external_id,
+                serde_json::to_string(&wallpaper)?
+            ],
+        )?;
+        drop(old);
+        let catalog = Catalog::open(&path)?;
+        assert_eq!(catalog.preferred_backend()?, None);
+        catalog.set_preferred_backend("hyprpaper")?;
+        drop(catalog);
+        let catalog = Catalog::open(&path)?;
+        assert_eq!(catalog.preferred_backend()?.as_deref(), Some("hyprpaper"));
+        let matches = catalog.matching_sources("local", &["one".into(), "not-saved".into()])?;
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches["one"].id, "existing-id");
+        assert!(matches["one"].favorite);
+        assert_eq!(matches["one"].tags, wallpaper.tags);
+        assert!(catalog
+            .matching_sources("wallhaven", &["one".into()])?
+            .is_empty());
+        assert!(catalog.matching_sources("local", &[])?.is_empty());
+        drop(catalog);
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+    #[test]
     fn newer_schema_is_not_modified() -> Result<()> {
         let path = std::env::temp_dir().join(format!("wallfolio-schema-{}.db", Uuid::new_v4()));
         let db = Connection::open(&path)?;
-        db.execute_batch("PRAGMA user_version=2")?;
+        db.execute_batch("PRAGMA user_version=3")?;
         assert!(Catalog::open(&path).is_err());
         assert_eq!(
             db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))?,
-            2
+            3
         );
         drop(db);
         std::fs::remove_file(path)?;
