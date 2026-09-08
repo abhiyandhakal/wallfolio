@@ -135,6 +135,8 @@ if name == 'xfconf-query' and '-l' in sys.argv:
         result = rpc('catalog.search')
         assert result[0]['cached_thumbnail'] and Path(result[0]['cached_thumbnail']).is_file()
         assert rpc('cache.status')['bytes'] > 0
+        assert rpc('cache.lookup', {'keys':[result[0]['thumbnail_key']]})[result[0]['thumbnail_key']] == result[0]['cached_thumbnail']
+        assert rpc('cache.lookup', {'keys':['../../source.png']}) == {}
         print('PASS: host adapters, AppImage environment, idle rotation, restart, random, cache')
     finally:
         if daemon is not None and daemon.poll() is None:

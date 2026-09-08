@@ -54,7 +54,10 @@ impl ThumbnailCache {
             std::thread::sleep(Duration::from_millis(100));
         });
     }
-    fn request(&self, key: String, job: Job) -> Option<PathBuf> {
+    pub fn lookup(&self, key: &str) -> Option<PathBuf> {
+        if key.len() != 64 || !key.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
         let _guard = self.files.lock().unwrap();
         let path = self.root.join(format!("{key}.png"));
         if path.is_file() {
@@ -63,18 +66,30 @@ impl ThumbnailCache {
             }
             return Some(path);
         }
+        None
+    }
+    fn request(&self, key: String, job: Job) -> Option<PathBuf> {
+        if let Some(path) = self.lookup(&key) {
+            return Some(path);
+        }
         let mut queue = self.queue.lock().unwrap();
         if queue.jobs.len() < 100 && queue.keys.insert(key.clone()) {
             queue.jobs.push_back((key, job));
         }
         None
     }
+    pub fn remote_key(url: &str) -> String {
+        format!("{:x}", Sha256::digest(url.as_bytes()))
+    }
+    pub fn local_key(hash: &str) -> String {
+        format!("{:x}", Sha256::digest(format!("local:{hash}").as_bytes()))
+    }
     pub fn remote(&self, url: &str) -> Option<PathBuf> {
-        let key = format!("{:x}", Sha256::digest(url.as_bytes()));
+        let key = Self::remote_key(url);
         self.request(key, Job::Remote(url.into()))
     }
     pub fn local(&self, path: &Path, hash: &str) -> Option<PathBuf> {
-        let key = format!("{:x}", Sha256::digest(format!("local:{hash}").as_bytes()));
+        let key = Self::local_key(hash);
         self.request(key, Job::Local(path.into()))
     }
     pub fn process_one(&self) -> Result<()> {

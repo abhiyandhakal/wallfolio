@@ -46,9 +46,13 @@ impl Application {
         let cached = if let (Some(path), Some(hash)) =
             (item["local_path"].as_str(), item["content_hash"].as_str())
         {
-            self.cache.local(std::path::Path::new(path), hash)
+            let cached = self.cache.local(std::path::Path::new(path), hash);
+            item["thumbnail_key"] = json!(ThumbnailCache::local_key(hash));
+            cached
         } else if let Some(url) = item["thumbnail"].as_str() {
-            self.cache.remote(url)
+            let cached = self.cache.remote(url);
+            item["thumbnail_key"] = json!(ThumbnailCache::remote_key(url));
+            cached
         } else {
             None
         };
@@ -94,6 +98,17 @@ impl Application {
             "device.backends" => Ok(serde_json::to_value(
                 self.backends.values().map(|b| b.info()).collect::<Vec<_>>(),
             )?),
+            "cache.lookup" => {
+                let keys: Vec<String> = serde_json::from_value(p["keys"].clone())?;
+                if keys.len() > 100 {
+                    bail!("at most 100 thumbnail keys per lookup");
+                }
+                Ok(Value::Object(
+                    keys.into_iter()
+                        .filter_map(|key| self.cache.lookup(&key).map(|path| (key, json!(path))))
+                        .collect(),
+                ))
+            }
             "cache.status" => {
                 let (bytes, entries, limit) = self.cache.stats()?;
                 Ok(json!({"bytes":bytes,"entries":entries,"max_bytes":limit}))
@@ -102,9 +117,21 @@ impl Application {
             "rotation.status" => Ok(json!(self.rotation()?)),
             "rotation.configure" => self.configure_rotation(p),
             "rotation.stop" => self.stop_rotation(),
-            "catalog.duplicates" => self
-                .catalog
-                .duplicate_groups(number(&p, "limit", 20), number(&p, "offset", 0)),
+            "catalog.duplicates" => {
+                let mut groups = self
+                    .catalog
+                    .duplicate_groups(number(&p, "limit", 20), number(&p, "offset", 0))?;
+                if let Some(groups) = groups.as_array_mut() {
+                    for group in groups {
+                        if let Some(items) = group["items"].as_array_mut() {
+                            for item in items {
+                                *item = self.decorate(item.take());
+                            }
+                        }
+                    }
+                }
+                Ok(groups)
+            }
             "provider.list" => Ok(json!(self.providers.keys().collect::<Vec<_>>())),
             "provider.search" => {
                 let provider = self
