@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Wallfolio
+Comment=Browse and manage your wallpaper catalog
+Exec=wallfolio-gui
+Icon=io.wallfolio.Wallfolio
+Terminal=false
+Categories=Graphics;
+Keywords=wallpaper;background;catalog;
+StartupNotify=true

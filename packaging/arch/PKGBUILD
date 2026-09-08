@@ -1,0 +1,31 @@
+pkgname=wallfolio
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Local-first wallpaper catalog with Rust CLI and Qt Quick GUI'
+arch=('x86_64' 'aarch64')
+url='https://github.com/abhiyandhakal/wallfolio'
+license=('MIT')
+depends=('gcc-libs' 'glibc' 'sqlite' 'qt6-base' 'qt6-declarative')
+makedepends=('rust' 'cmake')
+checkdepends=('python')
+optdepends=('swww: Wayland wallpaper application' 'hyprpaper: Hyprland wallpaper application' 'qt6-imageformats: additional image format plugins')
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP') # Locally generated git archive; set a checksum for a release.
+
+build() {
+    cd "$srcdir/$pkgname-$pkgver"
+    ./scripts/cargo-safe build --release --workspace --locked
+    ./scripts/build-gui
+}
+
+check() {
+    cd "$srcdir/$pkgname-$pkgver"
+    ./scripts/cargo-safe test --workspace --locked
+    ./scripts/cargo-safe build --workspace --locked
+    python3 tests/smoke.py
+}
+
+package() {
+    cd "$srcdir/$pkgname-$pkgver"
+    make install DESTDIR="$pkgdir" PREFIX=/usr
+}

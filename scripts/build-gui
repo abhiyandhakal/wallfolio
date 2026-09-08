@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+# Serial C++ compilation with a 3 GiB per-process address-space ceiling.
+ulimit -v 3145728
+mkdir -p build/gui
+if cmake --version >/dev/null 2>&1; then
+    cmake -S gui -B build/cmake-gui -DCMAKE_BUILD_TYPE=Release
+    cmake --build build/cmake-gui --parallel 1
+else
+    cd build/gui
+    qmake6 ../../gui/wallfolio.pro
+    make -j1
+fi

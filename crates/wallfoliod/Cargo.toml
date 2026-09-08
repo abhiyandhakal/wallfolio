@@ -1,0 +1,14 @@
+[package]
+name = "wallfoliod"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+wallfolio-protocol = { path = "../wallfolio-protocol" }
+wallfolio-core = { path = "../wallfolio-core" }
+wallfolio-adapters = { path = "../wallfolio-adapters" }

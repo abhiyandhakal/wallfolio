@@ -1,0 +1,16 @@
+[package]
+name = "wallfolio-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+wallfolio-catalog = { path = "../wallfolio-catalog" }
+wallfolio-storage = { path = "../wallfolio-storage" }
+wallfolio-protocol = { path = "../wallfolio-protocol" }
+wallfolio-provider-api = { path = "../wallfolio-provider-api" }
+wallfolio-backend-api = { path = "../wallfolio-backend-api" }
