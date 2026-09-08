@@ -14,3 +14,4 @@ wallfolio-storage = { path = "../wallfolio-storage" }
 wallfolio-protocol = { path = "../wallfolio-protocol" }
 wallfolio-provider-api = { path = "../wallfolio-provider-api" }
 wallfolio-backend-api = { path = "../wallfolio-backend-api" }
+serde.workspace = true

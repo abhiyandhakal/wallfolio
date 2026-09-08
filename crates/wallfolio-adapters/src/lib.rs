@@ -67,7 +67,7 @@ impl WallhavenProvider {
         Ok(Self {
             client: reqwest::blocking::Client::builder()
                 .timeout(Duration::from_secs(30))
-                .user_agent("wallfolio/0.1")
+                .user_agent(concat!("wallfolio/", env!("CARGO_PKG_VERSION")))
                 .build()?,
         })
     }

@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+cd "$(dirname "$0")/.."
+[ "$(uname -m)" = x86_64 ] || { echo 'This release script currently targets x86_64.' >&2; exit 1; }
+./scripts/fetch-appimage-tools
+./scripts/cargo-safe build --release --workspace --locked
+./scripts/build-gui
+project_root=$PWD
+appdir="$project_root/build/Wallfolio.AppDir"
+# Build into a fresh directory; do not carry removed libraries between releases.
+if [ -e "$appdir" ]; then mv "$appdir" "$appdir.previous.$(date +%s)"; fi
+make install DESTDIR="$appdir" PREFIX=/usr
+export APPIMAGE_EXTRACT_AND_RUN=1
+export QMAKE=${QMAKE:-$(command -v qmake6)}
+export QML_SOURCES_PATHS="$project_root/gui/qml"
+qt_plugins=$("$QMAKE" -query QT_INSTALL_PLUGINS)
+EXTRA_PLATFORM_PLUGINS=libqoffscreen.so
+for plugin in "$qt_plugins"/platforms/libqwayland*.so; do
+    [ ! -f "$plugin" ] || EXTRA_PLATFORM_PLUGINS="$EXTRA_PLATFORM_PLUGINS;$(basename "$plugin")"
+done
+export EXTRA_PLATFORM_PLUGINS
+export EXTRA_QT_MODULES='svg'
+export ARCH=x86_64
+# Upstream bundled strip predates RELR sections used by newer host Qt libraries.
+export NO_STRIP=1
+export VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"])')
+"$project_root/build/appimage-tools/linuxdeploy-x86_64.AppImage" --appdir "$appdir" \
+    --executable "$appdir/usr/bin/wallfolio-gui" --executable "$appdir/usr/bin/wallfolio" \
+    --executable "$appdir/usr/bin/wallfoliod" --plugin qt \
+    --desktop-file packaging/desktop/io.wallfolio.Wallfolio.desktop \
+    --icon-file assets/icons/io.wallfolio.Wallfolio.svg
+install -m755 packaging/appimage/AppRun "$appdir/AppRun"
+mkdir -p dist
+# mksquashfs must not create a worker per CPU on the developer's laptop.
+"$project_root/build/appimage-tools/appimagetool-x86_64.AppImage" --runtime-file "$project_root/build/appimage-tools/runtime-x86_64" --mksquashfs-opt -processors --mksquashfs-opt 1 \
+    "$appdir" "dist/Wallfolio-$VERSION-x86_64.AppImage"
+(cd dist && sha256sum "Wallfolio-$VERSION-x86_64.AppImage" > "Wallfolio-$VERSION-x86_64.AppImage.sha256")

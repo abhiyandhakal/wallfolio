@@ -70,6 +70,27 @@ enum Commands {
         #[arg(long)]
         monitor: Option<String>,
     },
+    /// Apply a random downloaded library wallpaper.
+    Random {
+        #[arg(long)]
+        favorite: bool,
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+        #[arg(long)]
+        backend: Option<String>,
+        #[arg(long)]
+        monitor: Option<String>,
+    },
+    Rotation {
+        #[command(subcommand)]
+        command: RotationCommand,
+    },
+    Duplicates {
+        #[arg(long, default_value_t = 20)]
+        limit: u32,
+        #[arg(long, default_value_t = 0)]
+        offset: u32,
+    },
     Backends,
     Info,
 }
@@ -86,6 +107,21 @@ enum ProviderCommand {
         provider: String,
         external_id: String,
     },
+}
+#[derive(Subcommand)]
+enum RotationCommand {
+    Start {
+        #[arg(long, default_value_t = 1800)]
+        interval: u64,
+        #[arg(long)]
+        favorite: bool,
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+        #[arg(long)]
+        monitor: Option<String>,
+    },
+    Stop,
+    Status,
 }
 fn main() -> Result<()> {
     let args = Args::parse();
@@ -154,6 +190,31 @@ fn main() -> Result<()> {
             "wallpaper.apply",
             json!({"id":id,"backend":backend,"monitor":monitor}),
         ),
+        Commands::Random {
+            favorite,
+            tags,
+            backend,
+            monitor,
+        } => (
+            "wallpaper.random",
+            json!({"favorite":favorite,"tags":tags,"backend":backend,"monitor":monitor}),
+        ),
+        Commands::Rotation { command } => match command {
+            RotationCommand::Start {
+                interval,
+                favorite,
+                tags,
+                monitor,
+            } => (
+                "rotation.configure",
+                json!({"enabled":true,"interval_seconds":interval,"favorite":favorite,"tags":tags,"monitor":monitor}),
+            ),
+            RotationCommand::Stop => ("rotation.stop", json!({})),
+            RotationCommand::Status => ("rotation.status", json!({})),
+        },
+        Commands::Duplicates { limit, offset } => {
+            ("catalog.duplicates", json!({"limit":limit,"offset":offset}))
+        }
         Commands::Backends => ("device.backends", json!({})),
         Commands::Info => ("device.info", json!({})),
     };

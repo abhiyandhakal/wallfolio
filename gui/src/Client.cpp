@@ -12,9 +12,22 @@
 #include <memory>
 QString Client::fileUrl(const QString &path) const { return QUrl::fromLocalFile(path).toString(); }
 void Client::startDaemon() {
-    QString executable = QCoreApplication::applicationDirPath() + "/wallfoliod";
-    if (!QFileInfo::exists(executable)) executable = "wallfoliod";
-    if (!QProcess::startDetached(executable, {})) emit failed("Cannot start wallfoliod. Add it to PATH or run it in a terminal.");
+    QString executable = qEnvironmentVariable("APPIMAGE");
+    QStringList arguments;
+    if (!executable.isEmpty()) {
+        arguments << "daemon";
+    } else {
+        executable = QCoreApplication::applicationDirPath() + "/wallfoliod";
+        if (!QFileInfo::exists(executable)) executable = "wallfoliod";
+    }
+    // A separate AppImage invocation owns its mount until the daemon exits.
+    QProcess process;
+    process.setProgram(executable);
+    process.setArguments(arguments);
+    process.setStandardInputFile(QProcess::nullDevice());
+    process.setStandardOutputFile(QProcess::nullDevice());
+    process.setStandardErrorFile(QProcess::nullDevice());
+    if (!process.startDetached()) emit failed("Cannot start wallfoliod. Add it to PATH or run it in a terminal.");
 }
 void Client::request(const QString &method, const QVariantMap &params) {
     if (m_busy) return;

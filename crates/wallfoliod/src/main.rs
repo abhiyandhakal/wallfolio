@@ -23,6 +23,7 @@ struct Args {
 }
 fn main() -> Result<()> {
     let args = Args::parse();
+    let custom_data_dir = args.data_dir.is_some();
     let root = args.data_dir.unwrap_or_else(|| {
         std::env::var_os("XDG_DATA_HOME")
             .map(PathBuf::from)
@@ -70,24 +71,45 @@ fn main() -> Result<()> {
     }
     let listener = UnixListener::bind(&socket)?;
     fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))?;
-    let mut app = Application::open(root)?;
+    let cache_root = if custom_data_dir {
+        root.join("cache/thumbnails")
+    } else {
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".cache")
+            })
+            .join("wallfolio/thumbnails")
+    };
+    let mut app = Application::open_with_cache(root, cache_root)?;
+    app.start_background();
     app.register_provider(Box::new(LocalProvider));
     app.register_provider(Box::new(WallhavenProvider::new()?));
     app.register_backend(Box::new(CommandBackend { id: "swww" }));
     app.register_backend(Box::new(CommandBackend { id: "hyprpaper" }));
     eprintln!("wallfoliod listening on {}", socket.display());
-    // Serialized requests keep SQLite and storage mutations ordered and bound memory.
-    for connection in listener.incoming() {
-        match connection {
-            Ok(mut stream) => {
+    listener.set_nonblocking(true)?;
+    let mut last_tick = std::time::Instant::now() - Duration::from_secs(1);
+    loop {
+        if last_tick.elapsed() >= Duration::from_secs(1) {
+            if let Err(error) = app.tick(wallfolio_core::rotation::now()) {
+                eprintln!("rotation: {error:#}");
+            }
+            last_tick = std::time::Instant::now();
+        }
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                stream.set_nonblocking(false)?;
                 if let Err(error) = serve(&app, &mut stream) {
                     eprintln!("client: {error:#}");
                 }
             }
-            Err(error) => eprintln!("accept: {error}"),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(100))
+            }
+            Err(error) => return Err(error.into()),
         }
     }
-    Ok(())
 }
 fn serve(app: &Application, stream: &mut UnixStream) -> Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
