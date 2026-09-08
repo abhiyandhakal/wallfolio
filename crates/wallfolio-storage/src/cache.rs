@@ -121,7 +121,7 @@ impl ThumbnailCache {
                     reader.decode()?
                 }
             };
-            let thumbnail = image.thumbnail(512, 320);
+            let thumbnail = image.thumbnail(image.width().min(512), image.height().min(320));
             let _guard = self.files.lock().unwrap();
             let temporary = self.root.join(format!("{key}.part"));
             thumbnail.save_with_format(&temporary, image::ImageFormat::Png)?;
@@ -181,6 +181,49 @@ impl ThumbnailCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn remote_preview_is_cached_and_reused_offline() -> Result<()> {
+        use std::io::Write;
+        let root =
+            std::env::temp_dir().join(format!("wallfolio-remote-cache-{}", uuid::Uuid::new_v4()));
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+        let url = format!("http://{}/preview.png", listener.local_addr()?);
+        let server = std::thread::spawn(move || -> std::io::Result<()> {
+            let (mut stream, _) = listener.accept()?;
+            stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+            let mut request = [0; 4096];
+            assert!(stream.read(&mut request)? > 0);
+            let mut png = Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgb8(image::RgbImage::new(8, 4))
+                .write_to(&mut png, image::ImageFormat::Png)
+                .unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                png.get_ref().len()
+            )?;
+            stream.write_all(png.get_ref())
+        });
+        let mut cache = ThumbnailCache::new(root.clone(), CACHE_LIMIT)?;
+        // Only this test permits HTTP, for an isolated loopback fixture server.
+        Arc::get_mut(&mut cache).unwrap().http = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()?;
+        assert!(cache.remote(&url).is_none());
+        cache.process_one()?;
+        server.join().unwrap()?;
+        let path = cache.remote(&url).unwrap();
+        assert_eq!(image::image_dimensions(&path)?, (8, 4));
+        drop(cache);
+        let cache = ThumbnailCache::new(root.clone(), CACHE_LIMIT)?;
+        // The HTTP server is gone; the normal HTTPS-only client still hits disk.
+        assert_eq!(cache.remote(&url), Some(path));
+        assert!(cache.lookup("../../outside.png").is_none());
+        assert_eq!(cache.stats()?.1, 1);
+        drop(cache);
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
     #[test]
     fn generated_thumbnails_survive_restart_and_evict_old_entries() -> Result<()> {
         let root = std::env::temp_dir().join(format!("wallfolio-cache-{}", uuid::Uuid::new_v4()));
