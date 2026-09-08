@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use rand::Rng;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -49,6 +50,98 @@ impl Catalog {
             )?;
         }
         Ok(Self(db))
+    }
+    pub fn setting(&self, key: &str) -> Result<Option<String>> {
+        Ok(self
+            .0
+            .query_row(
+                "SELECT value FROM device_settings WHERE key=?1",
+                [key],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+    pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
+        self.0.execute(
+            "INSERT INTO device_settings(key,value) VALUES (?1,?2)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+    /// Reservoir sampling uses constant memory, checks actual files, and avoids
+    /// repeating the current content when any alternative matches the filters.
+    pub fn random_downloaded(
+        &self,
+        favorite: bool,
+        tags: &[String],
+        previous_hash: Option<&str>,
+    ) -> Result<Option<Wallpaper>> {
+        let mut statement = self.0.prepare("SELECT document FROM wallpapers WHERE
+            json_extract(document,'$.local_path') IS NOT NULL
+            AND (?1=0 OR json_extract(document,'$.favorite')=1)
+            AND NOT EXISTS (SELECT 1 FROM json_each(?2) wanted WHERE NOT EXISTS
+                (SELECT 1 FROM json_each(document,'$.tags') actual WHERE actual.value=wanted.value))")?;
+        let rows = statement.query_map(params![favorite, serde_json::to_string(tags)?], |r| {
+            r.get::<_, String>(0)
+        })?;
+        let mut chosen = None;
+        let mut fallback = None;
+        let mut count = 0u64;
+        let mut rng = rand::thread_rng();
+        for row in rows {
+            let wallpaper: Wallpaper = serde_json::from_str(&row?)?;
+            if !wallpaper
+                .local_path
+                .as_ref()
+                .is_some_and(|p| Path::new(p).is_file())
+            {
+                continue;
+            }
+            if previous_hash.is_some() && wallpaper.content_hash.as_deref() == previous_hash {
+                fallback = Some(wallpaper);
+                continue;
+            }
+            count += 1;
+            if rng.gen_range(0..count) == 0 {
+                chosen = Some(wallpaper);
+            }
+        }
+        Ok(chosen.or(fallback))
+    }
+    pub fn duplicate_groups(&self, limit: u32, offset: u32) -> Result<serde_json::Value> {
+        let mut stmt = self.0.prepare(
+            "SELECT json_extract(document,'$.content_hash') AS hash,count(*) AS count
+            FROM wallpapers WHERE json_extract(document,'$.content_hash') IS NOT NULL
+            GROUP BY hash HAVING count(*) > 1 ORDER BY hash LIMIT ?1 OFFSET ?2",
+        )?;
+        let groups: Vec<(String, u64)> = stmt
+            .query_map(params![limit.clamp(1, 50), offset], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        let hashes: Vec<&str> = groups.iter().map(|g| g.0.as_str()).collect();
+        let mut rows = self.0.prepare("SELECT document FROM (
+            SELECT document,row_number() OVER (PARTITION BY json_extract(document,'$.content_hash') ORDER BY id) AS rank
+            FROM wallpapers WHERE json_extract(document,'$.content_hash') IN (SELECT value FROM json_each(?1))) WHERE rank <= 20")?;
+        let mut items: std::collections::BTreeMap<String, Vec<Wallpaper>> =
+            std::collections::BTreeMap::new();
+        for row in rows.query_map([serde_json::to_string(&hashes)?], |r| r.get::<_, String>(0))? {
+            let wallpaper: Wallpaper = serde_json::from_str(&row?)?;
+            items
+                .entry(wallpaper.content_hash.clone().unwrap())
+                .or_default()
+                .push(wallpaper);
+        }
+        Ok(serde_json::Value::Array(
+            groups
+                .into_iter()
+                .map(|(hash, count)| {
+                    let members = items.remove(&hash).unwrap_or_default();
+                    serde_json::json!({"content_hash":hash,"count":count,"items":members})
+                })
+                .collect(),
+        ))
     }
     pub fn preferred_backend(&self) -> Result<Option<String>> {
         Ok(self

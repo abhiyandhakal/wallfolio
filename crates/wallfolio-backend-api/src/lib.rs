@@ -10,5 +10,7 @@ pub struct BackendInfo {
 }
 pub trait WallpaperBackend: Send + Sync {
     fn info(&self) -> BackendInfo;
+    /// Release only processes owned by this backend when switching away.
+    fn deactivate(&self) {}
     fn apply(&self, path: &Path, monitor: Option<&str>) -> Result<()>;
 }

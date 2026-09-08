@@ -1,0 +1,20 @@
+#!/bin/sh
+set -eu
+APPDIR=${APPDIR:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}
+export APPDIR
+# Preserve the host environment when this launcher starts a second AppImage process.
+export WALLFOLIO_HOST_PATH=${WALLFOLIO_HOST_PATH-${PATH-}}
+export WALLFOLIO_HOST_LD_LIBRARY_PATH=${WALLFOLIO_HOST_LD_LIBRARY_PATH-${LD_LIBRARY_PATH-}}
+export WALLFOLIO_HOST_QT_PLUGIN_PATH=${WALLFOLIO_HOST_QT_PLUGIN_PATH-${QT_PLUGIN_PATH-}}
+export WALLFOLIO_HOST_QML2_IMPORT_PATH=${WALLFOLIO_HOST_QML2_IMPORT_PATH-${QML2_IMPORT_PATH-}}
+export WALLFOLIO_HOST_QML_IMPORT_PATH=${WALLFOLIO_HOST_QML_IMPORT_PATH-${QML_IMPORT_PATH-}}
+export PATH="$APPDIR/usr/bin:$WALLFOLIO_HOST_PATH"
+for hook in "$APPDIR"/apprun-hooks/*.sh; do
+    [ ! -f "$hook" ] || . "$hook"
+done
+case "${1-}" in
+    cli) shift; exec "$APPDIR/usr/bin/wallfolio" "$@" ;;
+    daemon) shift; exec "$APPDIR/usr/bin/wallfoliod" "$@" ;;
+    gui) shift; exec "$APPDIR/usr/bin/wallfolio-gui" "$@" ;;
+    *) exec "$APPDIR/usr/bin/wallfolio-gui" "$@" ;;
+esac

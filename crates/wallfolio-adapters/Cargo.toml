@@ -10,3 +10,6 @@ serde_json.workspace = true
 reqwest.workspace = true
 wallfolio-provider-api = { path = "../wallfolio-provider-api" }
 wallfolio-backend-api = { path = "../wallfolio-backend-api" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

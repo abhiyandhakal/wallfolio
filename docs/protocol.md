@@ -32,7 +32,7 @@ successful operation. There are no events or subscriptions in v1.
 | `wallpaper.download` | `id` | Wallpaper with local path/hash/dimensions |
 | `wallpaper.delete_local` | `id` | Wallpaper, local path cleared |
 | `wallpaper.apply` | `id`, optional `backend`, optional `monitor` | Applied status and backend |
-| `device.info` | none | Version, operating system, desktop |
+| `device.info` | none | Version, operating system, desktop, daemon PID |
 | `device.backends` | none | Backend availability and capabilities |
 | `device.settings` | none | `{preferred_backend: string or null}` from this local catalog |
 | `device.settings.update` | `preferred_backend` (registered backend name) | Saved settings, without applying a wallpaper |
@@ -64,3 +64,33 @@ preference, then auto-detection. A successful explicit apply remembers that engi
 A missing or unavailable preferred backend produces an error; it does not silently
 switch engines. GUI selections use `device.settings.update` immediately, so a
 selection is retained even if the window closes before applying a wallpaper.
+
+## v0.2 methods
+
+| Method | Parameters | Result |
+| --- | --- | --- |
+| `wallpaper.random` | `favorite` (false), `tags` ([]), optional `backend`, `monitor` | `{applied, backend, wallpaper}` |
+| `rotation.status` | none | Persisted rotation configuration/status |
+| `rotation.configure` | `enabled` (false), `interval_seconds` (1800), `favorite` (false), `tags` ([]), optional `monitor` | Saved configuration with a new next-run time |
+| `rotation.stop` | none | Disabled configuration; filters retained |
+| `catalog.duplicates` | `limit` (20, max 50 groups), `offset` (0) | Groups `{content_hash, count, items}` with at most 20 entries each |
+| `cache.status` | none | `{bytes, entries, max_bytes}` |
+| `cache.lookup` | `keys` (up to 100 SHA-256 thumbnail keys) | Object mapping ready keys to local thumbnail paths |
+
+Search and mutation results can include `thumbnail_key` and `cached_thumbnail`.
+The latter is null until generation/download finishes. `cache.lookup` reads only
+already-generated files; it never refetches a provider page. Cache files may be
+evicted at any time, so clients should fall back to the source preview on a read
+failure. Duplicate group items receive the same thumbnail enrichment.
+
+Rotation status contains `enabled`, `interval_seconds`, `favorite`, `tags`,
+`monitor`, `next_run`, `last_run`, and `last_error`. Times are Unix seconds or null.
+The interval must be 10–604800 seconds. Reconfiguration resets the next run and
+last status; clients cannot inject timestamps. Rotation uses the saved backend
+preference and selects only existing downloaded library files. Exact tag filters
+are combined with AND. Overdue rotation runs once when the daemon resumes.
+
+Engine monitor capabilities are authoritative. GNOME, KDE, and feh reject a
+nonempty monitor; Nitrogen requires a numeric head index. Xfce uses existing
+background property names. swaybg processes are owned by the adapter and cleaned
+up on replacement, switching away, and daemon exit on Linux.

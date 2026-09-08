@@ -1,9 +1,22 @@
 # Implementation status
 
-The implementation follows the v0.1 milestone in architecture section 42, which
-explicitly says not to build every future component immediately. The small daemon
-arrives with v0.1 to preserve the process boundaries in sections 4 and 18; scheduled
-background jobs remain v0.2 work.
+The implementation covers the v0.1 and v0.2 milestones in architecture section 42.
+The daemon arrived with v0.1 to preserve the process boundary; v0.2 adds its
+scheduled work, cache, duplicate groups, Linux adapters, and portable packaging.
+
+## v0.2 requirements and evidence
+
+| Requirement | Implementation | Verification |
+| --- | --- | --- |
+| Daemon background work | Idle timer and a bounded single thumbnail worker | `tests/backends.py` waits without IPC and observes an apply |
+| Random | Constant-memory local selection, favorites/exact tags, missing-file exclusion, repeat avoidance | Core tests, real CLI/API integration, GUI interaction test |
+| Rotation | Opt-in persisted schedule, 30-minute default, missed-run coalescing, error status, start/stop | Core restart/tick tests, daemon idle/restart test, QML controls |
+| Thumbnail cache | 256 MiB LRU eviction, persistent 512×320 previews, queue/decode/download bounds | Storage eviction/restart and remote offline-reuse tests, daemon lookup test, GUI readiness test |
+| Duplicates | SHA-256 groups, shared originals, separate catalog records, bounded group pagination | Core grouping test, shared-file lifecycle smoke test, GUI view |
+| Linux backends | swww, Hyprpaper, swaybg, GNOME, KDE, Xfce, feh, xwallpaper, Nitrogen | Exact fake-command integration, monitor rejection, environment restoration; actual desktops are not modified |
+| swaybg ownership | Replace only owned process; preserve old process on startup failure; parent-death cleanup | Integration verifies process replacement, failed start, switching away, daemon termination |
+| AppImage | GUI/CLI/daemon launcher, bundled Qt, separate daemon mount lifetime, checksummed tools | Actual AppImage GUI/CLI/daemon lifetime test, packaged random/apply/rotation checks |
+| GitHub releases | PR/master/manual build and artifact upload; matching version tags publish verified assets | [Ubuntu PR workflow](https://github.com/abhiyandhakal/wallfolio/actions/runs/34246628957) built, tested and uploaded the AppImage; tag publication remains opt-in |
 
 ## v0.1 requirements and evidence
 
@@ -39,14 +52,13 @@ background jobs remain v0.2 work.
 - Linux delivery includes a staged Makefile install, Arch source-package recipe,
   desktop entry, scalable icon, shell completions, and optional systemd user unit.
   `tests/install.py` validates the staged files and user unit without enabling it.
-- Feature-branch work and conventional commits follow AGENTS.md. No force push,
-  remote publication, or changes to the user's wallpaper are required to build.
+- Feature-branch work and conventional commits follow AGENTS.md. No force push
+  or changes to the user's wallpaper are required to build.
 
 ## Deliberate later work
 
-As described in the architecture's later milestones: rotation and background job
-queues; generated thumbnail cache; richer metadata/filtering; triage keyboard
-workflow; collections/ratings; additional providers and desktop backends; custom
+As described in the architecture's later milestones: richer metadata/filtering;
+triage keyboard workflow; collections/ratings; additional providers; custom
 HTTP provider protocol; server/authentication/sync; Windows named pipes and native
 Windows/macOS wallpaper application; other distribution formats.
 
@@ -60,6 +72,7 @@ restored by the GUI; full multi-device profiles remain future work. Other
 configuration is through CLI flags and XDG/WALLFOLIO_SOCKET environment variables; the
 example architecture TOML file is not yet read. Wallhaven authentication, NSFW
 queries, server sync, and arbitrary HTTP providers are not exposed as placeholder
-commands. Search uses SQLite's ASCII case folding. Slow network requests serialize
-other daemon work until they complete or time out. Automatic orphan cleanup is
+commands. Search uses SQLite's ASCII case folding. Slow foreground network requests serialize
+other client requests and rotation until they complete or time out. Thumbnail
+generation runs independently on one worker. Automatic orphan cleanup is
 not implemented, preserving the distinction between removal and local deletion.

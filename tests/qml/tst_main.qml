@@ -66,7 +66,12 @@ Item {
                 mock.starts = 0;
                 findChild(app, "detailDialog").close();
                 app.settingsLoaded = true;
+                app.backendOptions = [{id:"swww",label:"swww",available:true,per_monitor:true}, {id:"hyprpaper",label:"hyprpaper",available:true,per_monitor:true}];
                 app.preferredBackend = "swww";
+                app.syncBackendSelection();
+                findChild(app, "rotationDialog").close();
+                app.duplicateGroups = [];
+                app.cacheAttempts = 120;
                 app.page = 1;
                 app.startupRetry = false;
                 app.selected = null;
@@ -102,8 +107,10 @@ Item {
                 mock.completed("device.settings", {
                     preferred_backend: "hyprpaper"
                 });
+                compare(mock.calls[1].method, "device.backends");
+                mock.completed("device.backends", app.backendOptions);
                 compare(findChild(reopened, "backendSelector").currentText, "hyprpaper");
-                compare(mock.calls[1].method, "catalog.search");
+                compare(mock.calls[2].method, "catalog.search");
                 reopened.destroy();
             }
             function test_engineSelectionIsSavedImmediately() {
@@ -194,6 +201,54 @@ Item {
                 click(locate(app, "navDiscover"));
                 compare(mock.calls[1].method, "provider.search");
                 compare(mock.calls[1].params.provider, "wallhaven");
+            }
+            function test_randomAndRotationUseCore() {
+                click(locate(app, "rotationButton"));
+                compare(mock.calls[0].method, "rotation.status");
+                var dialog = findChild(app, "rotationDialog");
+                tryCompare(dialog, "opened", true);
+                mock.completed("rotation.status", {enabled:true, interval_seconds:1800, favorite:true, tags:["dark"], monitor:"DP-1", next_run:2000000000});
+                compare(findChild(app, "rotationInterval").text, "1800");
+                compare(findChild(app, "rotationTags").text, "dark");
+                verify(findChild(app, "rotationFavorite").checked);
+                findChild(app, "rotationInterval").text = "5";
+                verify(!findChild(app, "rotationStart").enabled);
+                findChild(app, "rotationInterval").text = "60";
+                findChild(app, "rotationTags").text = "dark, landscape, ";
+                mock.calls = [];
+                click(findChild(app, "randomNow"));
+                compare(mock.calls[0].method, "wallpaper.random");
+                compare(mock.calls[0].params.tags, ["dark", "landscape"]);
+                compare(mock.calls[0].params.favorite, true);
+                compare(mock.calls[0].params.monitor, "DP-1");
+                compare(mock.calls[0].params.backend, "swww");
+                click(findChild(app, "rotationStart"));
+                compare(mock.calls[1].method, "rotation.configure");
+                compare(mock.calls[1].params.interval_seconds, 60);
+                grabImage(app.contentItem).save("/tmp/wallfolio-rotation-controls.png");
+                click(findChild(app, "rotationStop"));
+                compare(mock.calls[2].method, "rotation.stop");
+                dialog.close();
+            }
+            function test_backendCapabilitiesAndUnavailablePreference() {
+                app.preferredBackend = "gnome";
+                mock.completed("device.backends", [{id:"swww",available:true,per_monitor:true}, {id:"gnome",available:false,per_monitor:false}]);
+                compare(findChild(app, "backendSelector").currentText, "gnome (unavailable)");
+                compare(findChild(app, "rotationBackend").currentIndex, 1);
+                verify(!findChild(app, "rotationMonitor").enabled);
+                compare(app.rotationParams().monitor, "");
+            }
+            function test_duplicatesAndThumbnailLookup() {
+                click(locate(app, "navDuplicates"));
+                compare(mock.calls[0].method, "catalog.duplicates");
+                mock.completed("catalog.duplicates", [{count:2,content_hash:"same",items:[{id:"one",title:"One",thumbnail_key:"key",provider:"local",source:""}]}]);
+                compare(app.duplicateGroups[0].count, 2);
+                app.lookupThumbnails();
+                compare(mock.calls[1].method, "cache.lookup");
+                compare(mock.calls[1].params.keys, ["key"]);
+                mock.completed("cache.lookup", {key:"/cache/thumb.png"});
+                compare(app.duplicateGroups[0].items[0].cached_thumbnail, "/cache/thumb.png");
+                compare(mock.calls.length, 2);
             }
             function test_providerFailureDoesNotRestartDaemon() {
                 mock.failed("Provider unavailable");

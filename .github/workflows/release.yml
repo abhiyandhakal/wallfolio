@@ -1,0 +1,83 @@
+name: Test and package Wallfolio
+on:
+  pull_request:
+  push:
+    branches: [master]
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: wallfolio-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+jobs:
+  appimage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: '1'
+      APPIMAGE_EXTRACT_AND_RUN: '1'
+      QT_QPA_PLATFORM: offscreen
+      QT_QUICK_BACKEND: software
+      QT_QUICK_CONTROLS_STYLE: Basic
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: rustfmt, clippy
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ make pkg-config libsqlite3-dev qt6-base-dev qt6-declarative-dev libqt6svg6-dev qt6-wayland qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-layouts qml6-module-qtquick-controls qml6-module-qtquick-templates qml6-module-qtqml-workerscript qml6-module-qttest desktop-file-utils zsh
+      - name: Check release version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os,tomllib
+          version=tomllib.load(open('Cargo.toml','rb'))['workspace']['package']['version']
+          assert os.environ['RELEASE_TAG']=='v'+version, 'Tag must match Cargo workspace version'
+          PY
+      - name: Rust checks
+        run: |
+          cargo fmt --all --check
+          ./scripts/cargo-safe test --workspace --locked
+          ./scripts/cargo-safe clippy --workspace --all-targets --locked -- -D warnings
+          ./scripts/cargo-safe build --workspace --locked
+          python3 tests/smoke.py
+          python3 tests/backends.py
+      - name: Build AppImage
+        run: ./scripts/build-appimage
+      - name: GUI and packaged application checks
+        run: |
+          /usr/lib/qt6/bin/qmltestrunner -input tests/qml
+          WALLFOLIO_TEST_GUI=build/cmake-gui/wallfolio-gui python3 tests/smoke.py
+          python3 tests/appimage.py dist/Wallfolio-*-x86_64.AppImage
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wallfolio-appimage-x86_64
+          path: dist/*
+          if-no-files-found: error
+  release:
+    if: startsWith(github.ref, 'refs/tags/') && github.event_name == 'push'
+    needs: appimage
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: wallfolio-appimage-x86_64
+          path: dist
+      - name: Publish verified artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/*
+          else
+            gh release create "$RELEASE_TAG" dist/* --verify-tag --generate-notes --title "Wallfolio $RELEASE_TAG"
+          fi

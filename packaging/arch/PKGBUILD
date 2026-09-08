@@ -1,5 +1,5 @@
 pkgname=wallfolio
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc='Local-first wallpaper catalog with Rust CLI and Qt Quick GUI'
 arch=('x86_64' 'aarch64')
@@ -8,7 +8,7 @@ license=('MIT')
 depends=('gcc-libs' 'glibc' 'sqlite' 'qt6-base' 'qt6-declarative')
 makedepends=('rust' 'cmake')
 checkdepends=('python')
-optdepends=('swww: Wayland wallpaper application' 'hyprpaper: Hyprland wallpaper application' 'qt6-imageformats: additional image format plugins')
+optdepends=('swww: Wayland wallpaper application' 'hyprpaper: Hyprland wallpaper application' 'swaybg: Wayland wallpaper application' 'feh: X11 wallpaper application' 'xwallpaper: X11 wallpaper application' 'nitrogen: X11 wallpaper application' 'gsettings-desktop-schemas: GNOME background settings' 'plasma-workspace: KDE wallpaper application' 'xfconf: Xfce wallpaper application' 'qt6-imageformats: additional image format plugins')
 source=("$pkgname-$pkgver.tar.gz")
 sha256sums=('SKIP') # Locally generated git archive; set a checksum for a release.
 

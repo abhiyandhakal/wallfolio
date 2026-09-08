@@ -1,14 +1,20 @@
+pub mod rotation;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
+use std::sync::Arc;
 use std::{collections::BTreeMap, path::PathBuf};
 use wallfolio_backend_api::WallpaperBackend;
 use wallfolio_catalog::{Catalog, Wallpaper};
 use wallfolio_protocol::{Request, Response, VERSION};
 use wallfolio_provider_api::WallpaperProvider;
-use wallfolio_storage::Storage;
+use wallfolio_storage::{
+    cache::{ThumbnailCache, CACHE_LIMIT},
+    Storage,
+};
 
 pub struct Application {
     catalog: Catalog,
+    cache: Arc<ThumbnailCache>,
     storage: Storage,
     providers: BTreeMap<String, Box<dyn WallpaperProvider>>,
     backends: BTreeMap<String, Box<dyn WallpaperBackend>>,
@@ -16,8 +22,13 @@ pub struct Application {
 }
 impl Application {
     pub fn open(root: PathBuf) -> Result<Self> {
+        let cache = root.join("cache/thumbnails");
+        Self::open_with_cache(root, cache)
+    }
+    pub fn open_with_cache(root: PathBuf, cache_root: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&root)?;
         Ok(Self {
+            cache: ThumbnailCache::new(cache_root, CACHE_LIMIT)?,
             catalog: Catalog::open(&root.join("wallfolio.db"))?,
             storage: Storage::new(root)?,
             providers: BTreeMap::new(),
@@ -27,6 +38,26 @@ impl Application {
                 .https_only(true)
                 .build()?,
         })
+    }
+    pub fn start_background(&self) {
+        self.cache.start();
+    }
+    fn decorate(&self, mut item: Value) -> Value {
+        let cached = if let (Some(path), Some(hash)) =
+            (item["local_path"].as_str(), item["content_hash"].as_str())
+        {
+            let cached = self.cache.local(std::path::Path::new(path), hash);
+            item["thumbnail_key"] = json!(ThumbnailCache::local_key(hash));
+            cached
+        } else if let Some(url) = item["thumbnail"].as_str() {
+            let cached = self.cache.remote(url);
+            item["thumbnail_key"] = json!(ThumbnailCache::remote_key(url));
+            cached
+        } else {
+            None
+        };
+        item["cached_thumbnail"] = json!(cached.map(|p| p.to_string_lossy().into_owned()));
+        item
     }
     pub fn register_provider(&mut self, provider: Box<dyn WallpaperProvider>) {
         self.providers.insert(provider.id().into(), provider);
@@ -44,10 +75,14 @@ impl Application {
         }
     }
     fn dispatch(&self, method: &str, p: Value) -> Result<Value> {
+        let p = if p.is_null() { json!({}) } else { p };
+        if !p.is_object() {
+            bail!("params must be an object");
+        }
         let id = || required(&p, "id");
         match method {
             "device.info" => Ok(
-                json!({"version": env!("CARGO_PKG_VERSION"), "os": std::env::consts::OS, "desktop": std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default()}),
+                json!({"version": env!("CARGO_PKG_VERSION"), "os": std::env::consts::OS, "pid": std::process::id(), "desktop": std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default()}),
             ),
             "device.settings" => {
                 Ok(json!({"preferred_backend": self.catalog.preferred_backend()?}))
@@ -63,6 +98,40 @@ impl Application {
             "device.backends" => Ok(serde_json::to_value(
                 self.backends.values().map(|b| b.info()).collect::<Vec<_>>(),
             )?),
+            "cache.lookup" => {
+                let keys: Vec<String> = serde_json::from_value(p["keys"].clone())?;
+                if keys.len() > 100 {
+                    bail!("at most 100 thumbnail keys per lookup");
+                }
+                Ok(Value::Object(
+                    keys.into_iter()
+                        .filter_map(|key| self.cache.lookup(&key).map(|path| (key, json!(path))))
+                        .collect(),
+                ))
+            }
+            "cache.status" => {
+                let (bytes, entries, limit) = self.cache.stats()?;
+                Ok(json!({"bytes":bytes,"entries":entries,"max_bytes":limit}))
+            }
+            "wallpaper.random" => self.random_wallpaper(p),
+            "rotation.status" => Ok(json!(self.rotation()?)),
+            "rotation.configure" => self.configure_rotation(p),
+            "rotation.stop" => self.stop_rotation(),
+            "catalog.duplicates" => {
+                let mut groups = self
+                    .catalog
+                    .duplicate_groups(number(&p, "limit", 20), number(&p, "offset", 0))?;
+                if let Some(groups) = groups.as_array_mut() {
+                    for group in groups {
+                        if let Some(items) = group["items"].as_array_mut() {
+                            for item in items {
+                                *item = self.decorate(item.take());
+                            }
+                        }
+                    }
+                }
+                Ok(groups)
+            }
             "provider.list" => Ok(json!(self.providers.keys().collect::<Vec<_>>())),
             "provider.search" => {
                 let provider = self
@@ -82,7 +151,9 @@ impl Application {
                         })
                     })
                     .collect();
-                Ok(json!(result?))
+                Ok(Value::Array(
+                    result?.into_iter().map(|v| self.decorate(v)).collect(),
+                ))
             }
             "provider.get" => Ok(serde_json::to_value(
                 self.providers
@@ -90,12 +161,17 @@ impl Application {
                     .context("unknown provider")?
                     .get(required(&p, "external_id")?)?,
             )?),
-            "catalog.search" => Ok(serde_json::to_value(self.catalog.search(
-                p["query"].as_str().unwrap_or(""),
-                p["favorite"].as_bool().unwrap_or(false),
-                number(&p, "limit", 100),
-                number(&p, "offset", 0),
-            )?)?),
+            "catalog.search" => {
+                let rows = self.catalog.search(
+                    p["query"].as_str().unwrap_or(""),
+                    p["favorite"].as_bool().unwrap_or(false),
+                    number(&p, "limit", 100),
+                    number(&p, "offset", 0),
+                )?;
+                Ok(Value::Array(
+                    rows.into_iter().map(|w| self.decorate(json!(w))).collect(),
+                ))
+            }
             "catalog.get" => Ok(serde_json::to_value(self.catalog.get(id()?)?)?),
             "catalog.add" => {
                 let candidate = self
@@ -117,7 +193,7 @@ impl Application {
                     width: None,
                     height: None,
                 })?;
-                Ok(serde_json::to_value(wallpaper)?)
+                Ok(self.decorate(serde_json::to_value(wallpaper)?))
             }
             "catalog.remove" => {
                 self.catalog.remove(id()?)?;
@@ -127,23 +203,14 @@ impl Application {
                 let mut wallpaper = self.catalog.get(id()?)?;
                 wallpaper.favorite = method == "favorite.add";
                 self.catalog.update(&wallpaper)?;
-                Ok(serde_json::to_value(wallpaper)?)
+                Ok(self.decorate(serde_json::to_value(wallpaper)?))
             }
             "catalog.tags" => {
                 let mut wallpaper = self.catalog.get(id()?)?;
                 let tags: Vec<String> = serde_json::from_value(p["tags"].clone())?;
-                if tags.len() > 100 || tags.iter().any(|t| t.len() > 100) {
-                    bail!("at most 100 tags of 100 bytes each");
-                }
-                wallpaper.tags = tags
-                    .into_iter()
-                    .map(|t| t.trim().to_owned())
-                    .filter(|t| !t.is_empty())
-                    .collect();
-                wallpaper.tags.sort();
-                wallpaper.tags.dedup();
+                wallpaper.tags = normalize_tags(tags)?;
                 self.catalog.update(&wallpaper)?;
-                Ok(serde_json::to_value(wallpaper)?)
+                Ok(self.decorate(serde_json::to_value(wallpaper)?))
             }
             "wallpaper.download" => {
                 let mut wallpaper = self.catalog.get(id()?)?;
@@ -163,7 +230,7 @@ impl Application {
                 wallpaper.width = Some(stored.width);
                 wallpaper.height = Some(stored.height);
                 self.catalog.update(&wallpaper)?;
-                Ok(serde_json::to_value(wallpaper)?)
+                Ok(self.decorate(serde_json::to_value(wallpaper)?))
             }
             "wallpaper.delete_local" => {
                 let mut wallpaper = self.catalog.get(id()?)?;
@@ -176,7 +243,7 @@ impl Application {
                 }
                 wallpaper.local_path = None;
                 self.catalog.update(&wallpaper)?;
-                Ok(serde_json::to_value(wallpaper)?)
+                Ok(self.decorate(serde_json::to_value(wallpaper)?))
             }
             "wallpaper.apply" => {
                 let wallpaper = self.catalog.get(id()?)?;
@@ -199,6 +266,14 @@ impl Application {
                         .context("no available wallpaper backend")?,
                 };
                 backend.apply(&path, p["monitor"].as_str())?;
+                for other in self.backends.values() {
+                    if other.info().id != backend.info().id {
+                        other.deactivate();
+                    }
+                }
+                if let Some(hash) = wallpaper.content_hash.as_deref() {
+                    self.catalog.set_setting("last_applied_hash", hash)?;
+                }
                 if let Some(name) = explicit {
                     self.catalog.set_preferred_backend(name)?;
                 }
@@ -219,4 +294,18 @@ fn number(params: &Value, key: &str, default: u32) -> u32 {
         .as_u64()
         .map(|v| v.min(u32::MAX as u64) as u32)
         .unwrap_or(default)
+}
+
+fn normalize_tags(tags: Vec<String>) -> Result<Vec<String>> {
+    if tags.len() > 100 || tags.iter().any(|t| t.len() > 100) {
+        bail!("at most 100 tags of 100 bytes each");
+    }
+    let mut tags: Vec<_> = tags
+        .into_iter()
+        .map(|t| t.trim().to_owned())
+        .filter(|t| !t.is_empty())
+        .collect();
+    tags.sort();
+    tags.dedup();
+    Ok(tags)
 }
