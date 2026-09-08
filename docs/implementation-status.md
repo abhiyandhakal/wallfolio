@@ -55,8 +55,9 @@ and provenance columns. It does not yet implement the proposed normalized tables
 for collections, devices, ratings, sync, and source registries. Provider and backend
 adapters share one crate until their number warrants separate packages.
 
-Backend choice is per request, not a persisted device profile. Configuration is
-currently through CLI flags and XDG/WALLFOLIO_SOCKET environment variables; the
+The preferred backend is persisted in the local catalog's device settings and
+restored by the GUI; full multi-device profiles remain future work. Other
+configuration is through CLI flags and XDG/WALLFOLIO_SOCKET environment variables; the
 example architecture TOML file is not yet read. Wallhaven authentication, NSFW
 queries, server sync, and arbitrary HTTP providers are not exposed as placeholder
 commands. Search uses SQLite's ASCII case folding. Slow network requests serialize

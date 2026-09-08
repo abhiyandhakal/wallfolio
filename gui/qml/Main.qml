@@ -23,9 +23,25 @@ ApplicationWindow {
     property var wallpapers: []
     property var selected: null
     property int page: 1
+    property bool settingsLoaded: false
+    property string preferredBackend: "swww"
+    onPageChanged: pageInput.text = String(page)
+    function updateWallpaper(result) {
+        selected = result
+        wallpapers = wallpapers.map(function(item) {
+            return item.provider === result.provider && item.external_id === result.external_id ? result : item
+        })
+    }
+    function jumpToPage() {
+        if (!client.busy && pageInput.acceptableInput) {
+            page = Number(pageInput.text)
+            refresh()
+        }
+    }
     property string status: "Connecting to your library…"
     property bool startupRetry: false
     function refresh() {
+        if (!settingsLoaded) { client.request("device.settings", {}); return }
         if (section === "Discover") client.request("provider.search", {provider: provider.currentText, query: search.text, page: page})
         else client.request("catalog.search", {query: search.text, favorite: section === "Favorites", limit: 24, offset: (page-1)*24})
     }
@@ -40,11 +56,16 @@ ApplicationWindow {
         function onCompleted(method, result) {
             window.status = "Ready"
             window.startupRetry = false
-            if (method === "catalog.search" || method === "provider.search") window.wallpapers = result
-            else if (method === "catalog.add") { window.selected = result; window.status = "Saved to your library"; if(window.section !== "Discover") window.refresh() }
+            if (method === "device.settings" || method === "device.settings.update") {
+                window.preferredBackend = result.preferred_backend || "swww"
+                backend.currentIndex = backend.model.indexOf(window.preferredBackend)
+                if (!window.settingsLoaded) { window.settingsLoaded = true; window.refresh() }
+            }
+            else if (method === "catalog.search" || method === "provider.search") window.wallpapers = result
+            else if (method === "catalog.add") { window.updateWallpaper(result); window.status = "Saved to your library"; if(window.section !== "Discover") window.refresh() }
             else if (method === "wallpaper.apply") window.status = "Wallpaper applied"
             else if (method === "catalog.remove") { detail.close(); window.refresh() }
-            else if (result && result.id) { window.selected = result; if(window.section !== "Discover") window.refresh() }
+            else if (result && result.id) { window.updateWallpaper(result); if(window.section !== "Discover") window.refresh() }
         }
         function onFailed(message) {
             window.status = message
@@ -111,7 +132,7 @@ ApplicationWindow {
                                 asynchronous: true; fillMode: Image.PreserveAspectCrop
                             }
                             Label { text: modelData.title; Layout.fillWidth: true; elide: Text.ElideRight; font.bold: true }
-                            Label { text: (modelData.favorite ? "♥  " : "") + modelData.provider + (modelData.local_path ? " · Downloaded" : ""); color: "#a0b4af"; font.pixelSize: 12 }
+                            Label { text: (modelData.favorite ? "♥  " : "") + modelData.provider + (modelData.local_path ? " · Downloaded" : (modelData.id ? " · In library" : "")); color: "#a0b4af"; font.pixelSize: 12 }
                         }
                         MouseArea { anchors.fill: parent; enabled: !client.busy; onClicked: { window.selected = modelData; detail.open() } }
                     }
@@ -120,8 +141,16 @@ ApplicationWindow {
             }
             RowLayout {
                 Button { text: "Previous"; enabled: window.page>1 && !client.busy; onClicked: { window.page--; window.refresh() } }
-                Label { text: "Page " + window.page; color: "#95a6a5" }
-                Button { text: "Next"; enabled: window.wallpapers.length === 24 && !client.busy; onClicked: { window.page++; window.refresh() } }
+                Label { text: window.section === "Discover" ? "Page" : "Page " + window.page; color: "#95a6a5" }
+                TextField {
+                    id: pageInput; objectName: "pageInput"; visible: window.section === "Discover"
+                    Layout.preferredWidth: 110; text: "1"; enabled: !client.busy
+                    validator: IntValidator { bottom: 1; top: 2147483647 }
+                    inputMethodHints: Qt.ImhDigitsOnly
+                    onAccepted: window.jumpToPage()
+                }
+                Button { objectName: "pageGo"; text: "Go"; visible: window.section === "Discover"; enabled: !client.busy && pageInput.acceptableInput; onClicked: window.jumpToPage() }
+                Button { text: "Next"; enabled: window.page < 2147483647 && window.wallpapers.length === 24 && !client.busy; onClicked: { window.page++; window.refresh() } }
                 Item { Layout.fillWidth: true }
             }
             Label { text: window.status; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#a6d3b4" }
@@ -147,8 +176,8 @@ ApplicationWindow {
             Label { text: window.selected ? (window.selected.tags || []).join(" · ") : ""; wrapMode: Text.Wrap; Layout.fillWidth: true }
             RowLayout {
                 enabled: !client.busy
-                Button { text: "Save to library"; visible: window.selected && !window.selected.id; onClicked: client.request("catalog.add", {provider: window.selected.provider, external_id: window.selected.external_id}) }
-                Button { objectName: "downloadButton"; text: "Download"; visible: window.selected && !!window.selected.id; onClicked: window.action("wallpaper.download") }
+                Button { objectName: "saveButton"; text: "Save to library"; visible: window.selected && !window.selected.id; onClicked: client.request("catalog.add", {provider: window.selected.provider, external_id: window.selected.external_id}) }
+                Button { objectName: "downloadButton"; text: window.selected && window.selected.local_path ? "Downloaded" : "Download"; enabled: window.selected && !window.selected.local_path; visible: window.selected && !!window.selected.id; onClicked: window.action("wallpaper.download") }
                 Button { text: window.selected && window.selected.favorite ? "Unfavorite" : "Favorite"; visible: window.selected && !!window.selected.id; onClicked: window.action(window.selected.favorite ? "favorite.remove" : "favorite.add") }
                 Button { text: "Delete local copy"; visible: window.selected && !!window.selected.local_path; onClicked: window.action("wallpaper.delete_local") }
                 Button { text: "Remove from library"; visible: window.selected && !!window.selected.id; onClicked: removeDialog.open() }
@@ -160,7 +189,10 @@ ApplicationWindow {
             }
             RowLayout {
                 visible: window.selected && !!window.selected.local_path; enabled: !client.busy
-                ComboBox { id: backend; model: ["swww", "hyprpaper"] }
+                ComboBox {
+                    id: backend; objectName: "backendSelector"; model: ["swww", "hyprpaper"]
+                    onActivated: client.request("device.settings.update", {preferred_backend: currentText})
+                }
                 TextField { id: monitor; placeholderText: "Monitor (blank for default)"; Layout.fillWidth: true }
                 Button { text: "Set wallpaper"; onClicked: window.action("wallpaper.apply", {backend: backend.currentText, monitor: monitor.text}) }
             }

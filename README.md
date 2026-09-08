@@ -86,7 +86,16 @@ tags, deletion, and applying wallpapers. It displays thumbnails for remote
 candidates and full local images after download. External wallpaper daemons must
 already be running in the graphical session. Backend availability indicates that
 the relevant executable and Wayland environment exist, not that its daemon is
-healthy. An explicit backend choice overrides automatic selection.
+healthy. The selected engine is saved immediately in the local catalog and
+restored when the GUI reopens. CLI `set --backend ...` also remembers the engine
+after a successful apply; later applies without `--backend` use that preference.
+A saved engine is not silently replaced if it is unavailable.
+
+Discover supports entering a page number and pressing Enter or Go. Its cards and
+preview controls reflect existing library, favorite, and downloaded state, including
+changes made during the current visit. Downloaded images display “Downloaded”
+instead of offering another download; deleting the local copy enables Download
+again.
 
 Hyprpaper uses its current `wallpaper` IPC command. Its blank monitor is a
 fallback, which does not override monitors with an existing explicit wallpaper.

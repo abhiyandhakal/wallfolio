@@ -27,13 +27,15 @@ successful operation. There are no events or subscriptions in v1.
 | `catalog.tags` | `id`, `tags` string array | Wallpaper with replacement tags |
 | `favorite.add` / `favorite.remove` | `id` | Wallpaper |
 | `provider.list` | none | Provider names |
-| `provider.search` | `provider`, `query`, `page` (1-based) | Candidate array |
+| `provider.search` | `provider`, `query`, `page` (1-based) | Candidate array, enriched with Wallpaper fields for saved items |
 | `provider.get` | `provider`, `external_id` | Candidate |
 | `wallpaper.download` | `id` | Wallpaper with local path/hash/dimensions |
 | `wallpaper.delete_local` | `id` | Wallpaper, local path cleared |
 | `wallpaper.apply` | `id`, optional `backend`, optional `monitor` | Applied status and backend |
 | `device.info` | none | Version, operating system, desktop |
 | `device.backends` | none | Backend availability and capabilities |
+| `device.settings` | none | `{preferred_backend: string or null}` from this local catalog |
+| `device.settings.update` | `preferred_backend` (registered backend name) | Saved settings, without applying a wallpaper |
 
 Wallpaper fields: `id`, `title`, `provider`, `external_id`, `source`, `thumbnail`,
 `tags`, `favorite`, `local_path`, `content_hash`, `width`, and `height`. Optional
@@ -50,3 +52,15 @@ not SQL wildcards. Oversized responses return an error; request a smaller limit.
 
 Mutations are not blindly retried after an uncertain connection failure. In
 particular, verify a catalog item before repeating an apply or delete operation.
+
+Discovery enrichment matches provider and external ID, using one indexed lookup
+for the returned page. Saved candidates carry their existing catalog `id`,
+`favorite`, `local_path`, and other Wallpaper fields. Unsaved candidates have no
+catalog ID. The GUI updates cached discovery cards after mutations, and new
+searches read the latest persistent state.
+
+Backend selection order for `wallpaper.apply` is explicit request, saved local
+preference, then auto-detection. A successful explicit apply remembers that engine.
+A missing or unavailable preferred backend produces an error; it does not silently
+switch engines. GUI selections use `device.settings.update` immediately, so a
+selection is retained even if the window closes before applying a wallpaper.
