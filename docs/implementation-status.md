@@ -11,12 +11,12 @@ scheduled work, cache, duplicate groups, Linux adapters, and portable packaging.
 | Daemon background work | Idle timer and a bounded single thumbnail worker | `tests/backends.py` waits without IPC and observes an apply |
 | Random | Constant-memory local selection, favorites/exact tags, missing-file exclusion, repeat avoidance | Core tests, real CLI/API integration, GUI interaction test |
 | Rotation | Opt-in persisted schedule, 30-minute default, missed-run coalescing, error status, start/stop | Core restart/tick tests, daemon idle/restart test, QML controls |
-| Thumbnail cache | 256 MiB LRU eviction, persistent 512×320 previews, queue/decode/download bounds | Storage eviction/restart test, daemon generation/lookup test, GUI readiness test |
+| Thumbnail cache | 256 MiB LRU eviction, persistent 512×320 previews, queue/decode/download bounds | Storage eviction/restart and remote offline-reuse tests, daemon lookup test, GUI readiness test |
 | Duplicates | SHA-256 groups, shared originals, separate catalog records, bounded group pagination | Core grouping test, shared-file lifecycle smoke test, GUI view |
 | Linux backends | swww, Hyprpaper, swaybg, GNOME, KDE, Xfce, feh, xwallpaper, Nitrogen | Exact fake-command integration, monitor rejection, environment restoration; actual desktops are not modified |
 | swaybg ownership | Replace only owned process; preserve old process on startup failure; parent-death cleanup | Integration verifies process replacement, failed start, switching away, daemon termination |
-| AppImage | GUI/CLI/daemon launcher, bundled Qt, separate daemon mount lifetime, checksummed tools | Real AppImage smoke test; artifact must be rebuilt after source changes |
-| GitHub releases | PR/master/manual build and artifact upload; matching version tags publish verified assets | Workflow source present; hosted CI verification pending |
+| AppImage | GUI/CLI/daemon launcher, bundled Qt, separate daemon mount lifetime, checksummed tools | Actual AppImage GUI/CLI/daemon lifetime test, packaged random/apply/rotation checks |
+| GitHub releases | PR/master/manual build and artifact upload; matching version tags publish verified assets | [Ubuntu PR workflow](https://github.com/abhiyandhakal/wallfolio/actions/runs/34246628957) built, tested and uploaded the AppImage; tag publication remains opt-in |
 
 ## v0.1 requirements and evidence
 
