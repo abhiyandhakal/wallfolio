@@ -248,6 +248,11 @@ impl Application {
                         .context("no available wallpaper backend")?,
                 };
                 backend.apply(&path, p["monitor"].as_str())?;
+                for other in self.backends.values() {
+                    if other.info().id != backend.info().id {
+                        other.deactivate();
+                    }
+                }
                 if let Some(hash) = wallpaper.content_hash.as_deref() {
                     self.catalog.set_setting("last_applied_hash", hash)?;
                 }

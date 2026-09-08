@@ -10,7 +10,7 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
-use wallfolio_adapters::{CommandBackend, LocalProvider, WallhavenProvider};
+use wallfolio_adapters::{CommandBackend, LocalProvider, SwaybgBackend, WallhavenProvider};
 use wallfolio_core::Application;
 use wallfolio_protocol::{Request, Response, MAX_FRAME};
 #[derive(Parser)]
@@ -85,8 +85,19 @@ fn main() -> Result<()> {
     app.start_background();
     app.register_provider(Box::new(LocalProvider));
     app.register_provider(Box::new(WallhavenProvider::new()?));
-    app.register_backend(Box::new(CommandBackend { id: "swww" }));
-    app.register_backend(Box::new(CommandBackend { id: "hyprpaper" }));
+    for id in [
+        "swww",
+        "hyprpaper",
+        "gnome",
+        "kde",
+        "xfce",
+        "feh",
+        "xwallpaper",
+        "nitrogen",
+    ] {
+        app.register_backend(Box::new(CommandBackend { id }));
+    }
+    app.register_backend(Box::<SwaybgBackend>::default());
     eprintln!("wallfoliod listening on {}", socket.display());
     listener.set_nonblocking(true)?;
     let mut last_tick = std::time::Instant::now() - Duration::from_secs(1);

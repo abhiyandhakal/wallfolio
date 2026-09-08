@@ -1,10 +1,5 @@
 use anyhow::{bail, Context, Result};
-use std::{
-    path::Path,
-    process::{Command, Stdio},
-    time::{Duration, Instant},
-};
-use wallfolio_backend_api::{BackendInfo, WallpaperBackend};
+use std::{path::Path, time::Duration};
 use wallfolio_provider_api::{Candidate, WallpaperProvider};
 
 pub struct LocalProvider;
@@ -132,84 +127,5 @@ impl WallpaperProvider for WallhavenProvider {
     }
 }
 
-pub struct CommandBackend {
-    pub id: &'static str,
-}
-fn installed(executable: &str) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::env::var_os("PATH")
-        .map(|p| {
-            std::env::split_paths(&p).any(|d| {
-                std::fs::metadata(d.join(executable))
-                    .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-                    .unwrap_or(false)
-            })
-        })
-        .unwrap_or(false)
-}
-fn run(program: &str, args: &[&str]) -> Result<()> {
-    let mut child = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .with_context(|| format!("cannot start {program}"))?;
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        if let Some(status) = child.try_wait()? {
-            if !status.success() {
-                bail!("{program} failed ({status}); check its daemon and session");
-            }
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            bail!("{program} timed out");
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
-impl WallpaperBackend for CommandBackend {
-    fn info(&self) -> BackendInfo {
-        let available = std::env::var_os("WAYLAND_DISPLAY").is_some()
-            && installed(if self.id == "hyprpaper" {
-                "hyprctl"
-            } else {
-                "swww"
-            });
-        BackendInfo {
-            id: self.id.into(),
-            available,
-            per_monitor: true,
-            transitions: self.id == "swww",
-        }
-    }
-    fn apply(&self, path: &Path, monitor: Option<&str>) -> Result<()> {
-        let path = path.to_str().context("path is not UTF-8")?;
-        let monitor = monitor.unwrap_or("");
-        if monitor.contains([',', '\n', '\r']) || monitor.starts_with('-') {
-            bail!("invalid monitor name");
-        }
-        match self.id {
-            "swww" => {
-                let mut args = vec!["img", path];
-                if !monitor.is_empty() {
-                    args.extend(["--outputs", monitor]);
-                }
-                run("swww", &args)
-            }
-            "hyprpaper" => {
-                if path.contains([',', '\n', '\r']) {
-                    bail!("Hyprpaper cannot accept commas or newlines in image paths");
-                }
-                run(
-                    "hyprctl",
-                    &["hyprpaper", "wallpaper", &format!("{monitor},{path}")],
-                )
-            }
-            _ => bail!("unknown backend"),
-        }
-    }
-}
+mod backends;
+pub use backends::{CommandBackend, SwaybgBackend};

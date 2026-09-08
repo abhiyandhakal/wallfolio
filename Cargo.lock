@@ -1477,6 +1477,7 @@ name = "wallfolio-adapters"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "libc",
  "reqwest",
  "serde_json",
  "wallfolio-backend-api",

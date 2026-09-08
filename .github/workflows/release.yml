@@ -46,6 +46,7 @@ jobs:
           ./scripts/cargo-safe clippy --workspace --all-targets --locked -- -D warnings
           ./scripts/cargo-safe build --workspace --locked
           python3 tests/smoke.py
+          python3 tests/backends.py
       - name: Build AppImage
         run: ./scripts/build-appimage
       - name: GUI and packaged application checks
