@@ -8,16 +8,24 @@ import socket
 import subprocess
 import sys
 import tempfile
+import struct
+import zlib
 import time
 
 image = Path(sys.argv[1]).resolve()
 with tempfile.TemporaryDirectory(prefix='wallfolio-appimage-') as directory:
     root = Path(directory)
     sock = root/'runtime/wallfoliod.sock'
+    tools = root/'bin'
+    tools.mkdir()
+    setter = tools/'swww'
+    setter.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$WALLFOLIO_TEST_ARGS"\n')
+    setter.chmod(0o755)
     env = dict(os.environ, APPIMAGE_EXTRACT_AND_RUN='1', WALLFOLIO_SOCKET=str(sock),
                XDG_DATA_HOME=str(root/'data'), XDG_CACHE_HOME=str(root/'cache'),
                QT_QPA_PLATFORM='offscreen', QT_QUICK_BACKEND='software',
-               WALLFOLIO_SCREENSHOT=str(root/'preview.png'))
+               WALLFOLIO_SCREENSHOT=str(root/'preview.png'), WAYLAND_DISPLAY='test',
+               PATH=str(tools)+os.pathsep+os.environ['PATH'], WALLFOLIO_TEST_ARGS=str(root/'args'))
     subprocess.run([str(image),'cli','--version'],env=env,check=True,timeout=60)
     daemon_pid = None
     try:
@@ -41,7 +49,23 @@ with tempfile.TemporaryDirectory(prefix='wallfolio-appimage-') as directory:
         result = subprocess.run([str(image),'cli','search'],env=env,capture_output=True,text=True,timeout=60)
         assert result.returncode == 0,result.stderr
         assert json.loads(result.stdout) == []
-        print('PASS: AppImage GUI, CLI, and daemon remaining alive after GUI exit')
+        def cli(*args):
+            result = subprocess.run([str(image),'cli',*args],env=env,capture_output=True,text=True,timeout=60)
+            assert result.returncode == 0, result.stderr
+            return json.loads(result.stdout)
+        assert {b['id'] for b in cli('backends')} == {'swww','hyprpaper','swaybg','gnome','kde','xfce','feh','xwallpaper','nitrogen'}
+        def chunk(kind, data):
+            return struct.pack('!I',len(data))+kind+data+struct.pack('!I',zlib.crc32(kind+data))
+        source = root/'fixture.png'
+        source.write_bytes(b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('!2I5B',1,1,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(b'\0\x50\x80\xa0'))+chunk(b'IEND',b''))
+        item = cli('add', str(source))
+        item = cli('download', item['id'])
+        assert cli('random','--backend','swww')['applied']
+        assert (root/'args').read_text().splitlines() == ['img',item['local_path']]
+        assert cli('rotation','start')['enabled']
+        assert cli('rotation','status')['interval_seconds'] == 1800
+        assert not cli('rotation','stop')['enabled']
+        print('PASS: AppImage GUI/CLI, surviving daemon, all backend registrations, random host apply, rotation')
     finally:
         if daemon_pid is None and sock.exists():
             try:

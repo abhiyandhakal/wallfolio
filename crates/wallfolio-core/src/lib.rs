@@ -208,16 +208,7 @@ impl Application {
             "catalog.tags" => {
                 let mut wallpaper = self.catalog.get(id()?)?;
                 let tags: Vec<String> = serde_json::from_value(p["tags"].clone())?;
-                if tags.len() > 100 || tags.iter().any(|t| t.len() > 100) {
-                    bail!("at most 100 tags of 100 bytes each");
-                }
-                wallpaper.tags = tags
-                    .into_iter()
-                    .map(|t| t.trim().to_owned())
-                    .filter(|t| !t.is_empty())
-                    .collect();
-                wallpaper.tags.sort();
-                wallpaper.tags.dedup();
+                wallpaper.tags = normalize_tags(tags)?;
                 self.catalog.update(&wallpaper)?;
                 Ok(self.decorate(serde_json::to_value(wallpaper)?))
             }
@@ -303,4 +294,18 @@ fn number(params: &Value, key: &str, default: u32) -> u32 {
         .as_u64()
         .map(|v| v.min(u32::MAX as u64) as u32)
         .unwrap_or(default)
+}
+
+fn normalize_tags(tags: Vec<String>) -> Result<Vec<String>> {
+    if tags.len() > 100 || tags.iter().any(|t| t.len() > 100) {
+        bail!("at most 100 tags of 100 bytes each");
+    }
+    let mut tags: Vec<_> = tags
+        .into_iter()
+        .map(|t| t.trim().to_owned())
+        .filter(|t| !t.is_empty())
+        .collect();
+    tags.sort();
+    tags.dedup();
+    Ok(tags)
 }

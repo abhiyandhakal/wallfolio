@@ -1,4 +1,4 @@
-use crate::{Application, Result};
+use crate::{normalize_tags, Application, Result};
 use anyhow::{bail, Context};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -51,9 +51,7 @@ impl Application {
         if !(10..=604800).contains(&config.interval_seconds) {
             bail!("rotation interval must be 10 seconds to 7 days");
         }
-        if config.tags.len() > 100 || config.tags.iter().any(|t| t.len() > 100) {
-            bail!("invalid rotation tags");
-        }
+        config.tags = normalize_tags(config.tags)?;
         config.next_run = config.enabled.then(|| now() + config.interval_seconds);
         config.last_run = None;
         config.last_error = None;
@@ -87,6 +85,7 @@ impl Application {
     pub(crate) fn random_wallpaper(&self, params: Value) -> Result<Value> {
         let tags: Vec<String> =
             serde_json::from_value(params.get("tags").cloned().unwrap_or_else(|| json!([])))?;
+        let tags = normalize_tags(tags)?;
         let previous = self.catalog.setting("last_applied_hash")?;
         let wallpaper = self
             .catalog
@@ -167,7 +166,7 @@ mod tests {
             })?;
         }
         assert!(app.random_wallpaper(json!({"tags":["absent"]})).is_err());
-        let first = app.random_wallpaper(json!({"favorite":true,"tags":["dark"]}))?;
+        let first = app.random_wallpaper(json!({"favorite":true,"tags":[" dark ", "", "dark"]}))?;
         let second = app.random_wallpaper(json!({"favorite":true,"tags":["dark"]}))?;
         assert_ne!(
             first["wallpaper"]["content_hash"],
@@ -193,6 +192,25 @@ mod tests {
         assert_eq!(calls.lock().unwrap().len(), 2); // once, not ten missed intervals
         app.stop_rotation()?;
         app.tick(due + 1000)?;
+        assert_eq!(calls.lock().unwrap().len(), 2);
+        assert!(app
+            .configure_rotation(json!({"enabled":true,"interval_seconds":1}))
+            .is_err());
+        assert!(app
+            .random_wallpaper(json!({"tags":vec!["tag";101]}))
+            .is_err());
+        let failed = app.configure_rotation(
+            json!({"enabled":true,"interval_seconds":10,"tags":[" absent ","absent",""]}),
+        )?;
+        assert_eq!(failed["tags"], json!(["absent"]));
+        let due = failed["next_run"].as_u64().unwrap();
+        app.tick(due)?;
+        let status = app.rotation()?;
+        assert!(status
+            .last_error
+            .unwrap()
+            .contains("no downloaded wallpapers match"));
+        assert_eq!(status.next_run, Some(due + 10));
         assert_eq!(calls.lock().unwrap().len(), 2);
         drop(app);
         std::fs::remove_dir_all(root)?;
