@@ -2,12 +2,11 @@
 
 A local-first wallpaper catalog with a Rust core, CLI, and Qt Quick desktop client.
 Wallhaven and local directories provide discovery; catalog IDs belong to Wallfolio.
-The optional `swww` and Hyprpaper adapters apply downloaded wallpapers on Wayland.
-
-This implements the v0.1 scope in [ARCHITECTURE.md](ARCHITECTURE.md). A small socket
-daemon is included now so the GUI and CLI share one catalog owner from the start.
-Rotation, sync, other providers/backends, and Windows/macOS support remain later
-milestones as specified in the architecture.
+The daemon owns the catalog, wallpaper rotation, and thumbnail cache; GUI and CLI
+use the same local API. v0.2 adds random selection, persisted rotation, duplicate
+groups, Linux wallpaper backends, and an AppImage containing all three programs.
+Sync, custom providers, and Windows/macOS support remain later milestones in
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Build
 
@@ -56,6 +55,11 @@ wallfolio tags <catalog-id> dark landscape
 wallfolio search dark --favorite
 wallfolio backends
 wallfolio set <catalog-id> --backend swww --monitor DP-1
+wallfolio random --favorite --tag dark
+wallfolio rotation start --interval 1800 --favorite --tag dark
+wallfolio rotation status
+wallfolio rotation stop
+wallfolio duplicates
 wallfolio remove-local <catalog-id>
 wallfolio remove <catalog-id>
 ```
@@ -81,12 +85,11 @@ without explicit filters; no account or API token is needed.
   delete the local copy first if you also want to free its disk space.
 - Original user files are never deleted by these operations.
 
-The GUI supports Library, Discover, Favorites, preview, import/save, download,
-tags, deletion, and applying wallpapers. It displays thumbnails for remote
-candidates and full local images after download. External wallpaper daemons must
-already be running in the graphical session. Backend availability indicates that
-the relevant executable and Wayland environment exist, not that its daemon is
-healthy. The selected engine is saved immediately in the local catalog and
+The GUI supports Library, Discover, Favorites, Duplicates, preview, import/save,
+download, tags, deletion, and applying wallpapers. Random and rotation controls
+are in the sidebar. Generated thumbnails keep library browsing lightweight;
+full local images remain available in the detail preview. Backend availability
+checks the host executable and desktop/session environment, not daemon health. The selected engine is saved immediately in the local catalog and
 restored when the GUI reopens. CLI `set --backend ...` also remembers the engine
 after a successful apply; later applies without `--backend` use that preference.
 A saved engine is not silently replaced if it is unavailable.
@@ -101,11 +104,70 @@ Hyprpaper uses its current `wallpaper` IPC command. Its blank monitor is a
 fallback, which does not override monitors with an existing explicit wallpaper.
 See the [Hyprpaper IPC documentation](https://wiki.hypr.land/Hypr-Ecosystem/hyprpaper/#ipc).
 
+## Random, rotation, and duplicates
+
+Random chooses an existing downloaded file from your library, with optional
+favorites and exact tag filters (all tags must match). It avoids the last applied
+content when another match exists. Missing local files and remote-only entries
+are skipped. It never downloads a random provider result.
+
+Rotation is opt-in, defaults to 30 minutes, and accepts intervals from 10 seconds
+to seven days. The schedule, filters, and status persist in the local catalog.
+The daemon runs it while the GUI is closed and resumes it after restart, applying
+once if overdue instead of replaying missed intervals. A failed apply is recorded
+in rotation status and retried at the next scheduled interval. Slow foreground
+requests can delay a scheduled change. Login startup requires enabling the user
+service or configuring your desktop to launch the AppImage daemon.
+
+Duplicates are exact SHA-256 matches, detected when files are downloaded/imported
+into managed storage. Separate catalog entries retain their own provenance,
+favorites, and tags while sharing the original file. The Duplicates view and CLI
+show paged groups, with counts and up to 20 members per group. There is no automatic
+merging or deletion.
+
+## Linux wallpaper engines
+
+Wallpaper tools are optional host dependencies, including for the AppImage.
+
+| Engine | Host command | Monitor support |
+| --- | --- | --- |
+| swww | `swww` with its daemon running | Output name |
+| Hyprpaper | `hyprctl` with Hyprpaper running | Output name; blank means fallback |
+| swaybg | `swaybg`, launched and managed by Wallfolio | Output name; blank means all |
+| GNOME | `gsettings` in a GNOME session | All monitors, light and dark settings |
+| KDE Plasma | `plasma-apply-wallpaperimage` | All desktops/monitors |
+| Xfce | `xfconf-query` | Configured output name; all matching workspaces |
+| feh | `feh` in X11 | All monitors |
+| xwallpaper | `xwallpaper` in X11 | Output name |
+| Nitrogen | `nitrogen` in X11 | Numeric head index; blank means all |
+
+The GUI disables monitor entry for engines without independent monitor support.
+Xfce needs existing desktop background properties; initialize these in Xfce
+Settings if Wallfolio reports none. Wallfolio replaces only its own swaybg process,
+retains it if replacement fails, and stops it when switching engines or when the
+daemon exits. Other wallpaper processes are never terminated by Wallfolio.
+Commands have bounded output and a 15-second timeout. AppImage library paths are
+removed from host command environments.
+
+Backend command references: [swaybg](https://github.com/swaywm/swaybg/blob/master/swaybg.1.scd),
+[xwallpaper](https://github.com/stoeckmann/xwallpaper/blob/master/xwallpaper.1),
+[feh](https://github.com/derf/feh/blob/master/man/feh.pre),
+[Nitrogen](https://github.com/l3ib/nitrogen/blob/master/src/main.cc),
+[GNOME](https://help.gnome.org/system-admin-guide/desktop-background.html),
+[KDE](https://github.com/KDE/plasma-workspace/blob/master/wallpapers/image/plasma-apply-wallpaperimage.cpp),
+[Xfce](https://docs.xfce.org/xfce/xfdesktop/usage).
+
 ## Storage and protocol
 
 Metadata lives in `$XDG_DATA_HOME/wallfolio/wallfolio.db` (by default
 `~/.local/share/wallfolio/wallfolio.db`). Images live under `originals/<hash-prefix>/`.
-`wallfoliod --data-dir PATH` selects an isolated catalog.
+`wallfoliod --data-dir PATH` selects an isolated catalog and thumbnail cache.
+
+Remote previews and generated local thumbnails use a 256 MiB cache under
+`$XDG_CACHE_HOME/wallfolio/thumbnails` (default `~/.cache/wallfolio/thumbnails`).
+A single worker decodes one image at a time, with at most 100 queued jobs. Cached
+images persist across restarts; oldest-accessed entries are evicted. Preview
+failures do not fail discovery, and the GUI falls back if an entry is evicted.
 
 The socket is `$XDG_RUNTIME_DIR/wallfolio/wallfoliod.sock`, falling back to
 `~/.cache/wallfolio/wallfoliod.sock`. `WALLFOLIO_SOCKET` overrides it for both
@@ -123,6 +185,7 @@ See [the protocol reference](docs/protocol.md) and
 ./scripts/cargo-safe clippy --workspace --all-targets --locked -- -D warnings
 ./scripts/cargo-safe build --workspace --locked
 python3 tests/smoke.py
+python3 tests/backends.py
 WALLFOLIO_TEST_GUI=build/cmake-gui/wallfolio-gui python3 tests/smoke.py
 ```
 
@@ -166,7 +229,7 @@ systemctl --user enable --now wallfoliod.service
 For Arch, create a source archive from your committed checkout, then use makepkg:
 
 ```sh
-git archive --format=tar.gz --prefix=wallfolio-0.1.0/ HEAD > packaging/arch/wallfolio-0.1.0.tar.gz
+git archive --format=tar.gz --prefix=wallfolio-0.2.0/ HEAD > packaging/arch/wallfolio-0.2.0.tar.gz
 cd packaging/arch
 makepkg -s
 ```
@@ -176,3 +239,40 @@ installation using Zsh, desktop-file-validate, and systemd-analyze. It does not
 install anything outside its temporary directory.
 
 No service is enabled automatically. Wallpaper setters remain optional host tools.
+
+## AppImage and GitHub releases
+
+```sh
+chmod +x Wallfolio-0.2.0-x86_64.AppImage
+./Wallfolio-0.2.0-x86_64.AppImage           # GUI; starts daemon if needed
+./Wallfolio-0.2.0-x86_64.AppImage cli search
+./Wallfolio-0.2.0-x86_64.AppImage daemon    # Explicit daemon startup
+```
+
+The AppImage contains the GUI, CLI, daemon, and Qt dependencies. GUI startup
+connects to an existing daemon or launches a separate invocation of the same
+AppImage, keeping the daemon's bundle available after the GUI closes. The CLI
+requires a running daemon. Data stays in the normal XDG directories outside the
+bundle. Replacing the AppImage preserves it; restart the running daemon to use
+the new version. Desktop wallpaper engines remain system dependencies.
+
+Build on Linux x86_64 with the requirements above plus Python 3 and Qt SVG/Wayland
+plugins:
+
+```sh
+./scripts/build-appimage
+python3 tests/appimage.py dist/Wallfolio-0.2.0-x86_64.AppImage
+```
+
+Output is in `dist/` with a SHA-256 checksum. Build tools are downloaded with
+pinned checksums from `packaging/appimage/tools.json`. If upstream continuous
+artifacts change, update the manifest only after verifying the replacement. The
+builder uses extraction instead of requiring FUSE. At runtime on a machine without
+FUSE, set `APPIMAGE_EXTRACT_AND_RUN=1`.
+
+GitHub Actions builds and tests on Ubuntu 24.04 for PRs, master pushes, and manual
+runs, uploading an x86_64 AppImage artifact. Pushing a `v*` tag matching the Cargo
+workspace version additionally publishes the verified AppImage and checksum to a
+GitHub release. Ordinary PR/manual runs do not publish releases. Build on the CI
+baseline for distribution: a bundle built on a newer local distribution can
+require a newer glibc than Ubuntu 24.04.
